@@ -31,11 +31,13 @@ class Route:
     body_schema: dict | None = None
     file_field: str | None = None
     capability: dict | None = None  # the @AiCapability descriptor when the route has one
+    response_schema: dict | None = None  # success response (from the handler's TypeScript return type)
 
 
 _routes: dict[str, Route] = {}
 _bm25: BM25Okapi | None = None
 _order: list[str] = []
+_components: dict[str, Any] = {}  # the spec's named schemas, for describe() to resolve $refs on demand
 _built_at = 0.0
 _build_lock = asyncio.Lock()  # parallel tool calls may ask for the index at the same moment
 # Rebuilt this often so new or changed backend routes show up without a restart.
@@ -139,12 +141,14 @@ async def _build(token: str) -> None:
                 body_schema=body,
                 file_field=file_field,
                 capability=cap,
+                response_schema=_success_schema(op),
             )
             routes[rid] = route
             order.append(rid)
             fields = list((body or {}).get('properties', {}).keys())
             docs.append(_words(f"{rid} {rid.replace('.', ' ')} {path.replace('/', ' ')} {' '.join(fields)} {summary}"))
-    _routes, _order, _bm25 = routes, order, BM25Okapi(docs)
+    global _components
+    _routes, _order, _bm25, _components = routes, order, BM25Okapi(docs), components
 
 
 def get(rid: str) -> Route | None:
@@ -214,9 +218,32 @@ def _compact(schema: Any, defs: dict, depth: int = 0) -> Any:
     return out
 
 
+def _success_schema(op: dict) -> dict | None:
+    for code, response in (op.get('responses') or {}).items():
+        if str(code).startswith('2'):
+            schema = ((response or {}).get('content') or {}).get('application/json', {}).get('schema')
+            return schema if isinstance(schema, dict) else None
+    return None
+
+
+def _returns(route: Route) -> str:
+    """The shape a call returns, as compact as the inputs; the {statusCode, message, data} envelope unwrapped."""
+    schema = route.response_schema
+    if not schema:
+        return ''
+    if '$ref' in schema:
+        schema = _components.get(schema['$ref'].split('/')[-1], {})
+    props = schema.get('properties') or {}
+    if 'data' in props and ({'statusCode', 'message', 'success'} & props.keys()):
+        schema = props['data']
+    shape = _compact(schema, _components)
+    return json.dumps(shape, ensure_ascii=False)[:1500] if shape not in ({}, 'object', None) else ''
+
+
 def describe(route: Route) -> str:
     cap = route.capability
     lines = [line(route)]
+    returns = _returns(route)
     if cap:
         inp, defs = cap.get('input') or {}, cap.get('definitions') or {}
         for slot in ('path', 'query', 'body'):
@@ -226,6 +253,8 @@ def describe(route: Route) -> str:
             lines.append(f"file: field '{inp['file'].get('field')}' (pass file=<sandbox path>)")
         if cap.get('returns'):
             lines.append(f"returns: {cap['returns']}")
+        if returns:
+            lines.append(f'returns (data): {returns}')
         if cap.get('job'):
             lines.append('starts a background job; cc_action follows it to the end')
     else:
@@ -237,6 +266,8 @@ def describe(route: Route) -> str:
             lines.append(f'body: {json.dumps(_compact(route.body_schema, {}), ensure_ascii=False)}')
         if route.file_field:
             lines.append(f"file: field '{route.file_field}' (pass file=<sandbox path>)")
+        if returns:
+            lines.append(f'returns (data): {returns}')
     return '\n'.join(lines)[:6000]
 
 
