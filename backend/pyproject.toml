@@ -1,7 +1,7 @@
 [project]
 name = "aihub-backend"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi==0.115.6",
     "uvicorn[standard]==0.34.0",
@@ -11,7 +11,12 @@ dependencies = [
     "pyjwt==2.10.1",
     "alembic==1.14.0",
     "httpx==0.28.1",
+    "python-multipart==0.0.20",  # form uploads on /chat/stream and /chat/send-with-file
+    "aihub-ai",  # the agent core, ../ai (workspace member; docs/adr/0006)
 ]
+
+[tool.uv.sources]
+aihub-ai = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -26,7 +31,7 @@ pythonpath = ["."]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["app"]
@@ -34,3 +39,8 @@ files = ["app"]
 [[tool.mypy.overrides]]
 module = ["alembic.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The agent core is checked by pyright from the repo root; here only its interface is used.
+module = ["ai", "ai.*"]
+follow_imports = "silent"

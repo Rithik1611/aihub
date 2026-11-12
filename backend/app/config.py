@@ -19,11 +19,10 @@ class Settings(BaseSettings):
     db_max_overflow: int = Field(default=5, ge=0)
     db_echo: bool = False
 
-    # The aihub AI service. Still under development; when it is unreachable a turn
-    # fails but the user's stored message is kept.
-    ai_base_url: str = "http://localhost:8888/api/chatbot"
-    # Dev only: answer with a canned reply instead of calling the AI service, so the
-    # chat flow can be exercised before the service exists. Replies are prefixed so
+    # The agent runs in process from ai/ (docs/adr/0006) and reads its own settings
+    # (LUNA_*, CC_*) from the same environment / .env - see ai/settings.py.
+    # Dev only: answer with a canned reply instead of running the agent, so the chat
+    # flow works without the model, cableCORE or the sandbox. Replies are prefixed so
     # stored stub content is never mistaken for a real answer. Never enable in
     # production - guarded in app.main.
     ai_stub: bool = False

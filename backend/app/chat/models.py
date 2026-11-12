@@ -73,6 +73,12 @@ class ChatMessage(Base):
     message_metadata: Mapped[dict[str, object] | None] = mapped_column(
         "metadata", JSONB(none_as_null=True)  # type: ignore[no-untyped-call]  # JSONB.__init__ is untyped upstream
     )
+    # The agent's own record of the turn this AI message ends (docs/adr/0006):
+    # {"covered": [message ids the items already contain], "items": [Responses API items]}.
+    # Replayed as history so the model keeps its tool calls and results; never sent to the client.
+    agent_items: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True)  # type: ignore[no-untyped-call]  # JSONB.__init__ is untyped upstream
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -105,6 +105,8 @@ class ChatQuestion(_Payload):
     q: str = ""
     type: QuestionType = QuestionType.RADIO
     options: list[str] = Field(default_factory=list)
+    # A short explanation under each option, same order (the frontend card shows it).
+    descriptions: list[str] = Field(default_factory=list)
 
 
 class ChatAttachment(_Payload):

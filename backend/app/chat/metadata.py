@@ -41,6 +41,7 @@ def _clamp_question(question: ChatQuestion) -> ChatQuestion:
         q=_clamp_text(question.q),
         type=question.type,
         options=[_clamp_text(o) for o in question.options[:MAX_OPTIONS]],
+        descriptions=[_clamp_text(d) for d in question.descriptions[:MAX_OPTIONS]],
     )
 
 

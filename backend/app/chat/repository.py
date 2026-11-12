@@ -249,12 +249,14 @@ class ChatRepository:
         sender: ChatSender,
         content: str,
         metadata: ChatMessageMetadata | None = None,
+        agent_items: dict[str, object] | None = None,
     ) -> ChatMessage:
         message = ChatMessage(
             session_id=session_id,
             sender=sender.value,
             content=content,
             message_metadata=_stored_metadata(metadata),
+            agent_items=agent_items,
         )
         self._db.add(message)
         await self._db.flush()
