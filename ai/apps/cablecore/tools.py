@@ -7,7 +7,9 @@ from typing import Any, Literal
 
 from ai.apps.cablecore import actions as harness, api, formula, index, notes, records, related
 from ai.apps.cablecore.actions import Action
+from ai.apps.cablecore.codemode import codemode_tool
 from ai.context import TurnContext
+from ai.settings import settings
 from ai.tools import Tool, tool
 
 
@@ -242,5 +244,12 @@ async def cablecore_api_access(ctx: TurnContext, purpose: str) -> str:
 
 
 def tools() -> list[Tool]:
-    return [tool(cc_search), tool(cc_get), tool(cc_related), tool(cc_formula), tool(cc_find), tool(cc_describe),
-            tool(cc_action, sequential=True), tool(cc_note), tool(cablecore_api_access, sequential=True)]
+    """By CC_TOOL_MODE (ai/settings.py): the API through our harness, or through Code Mode (cc_code)."""
+    data = [tool(cc_search), tool(cc_get), tool(cc_related), tool(cc_formula)]
+    rest = [tool(cc_note), tool(cablecore_api_access, sequential=True)]
+    mode = settings().cc_tool_mode
+    if mode == 'codemode':
+        return [*data, codemode_tool(), *rest]
+    if mode == 'codemode_all':
+        return [codemode_tool(), *rest]
+    return [*data, tool(cc_find), tool(cc_describe), tool(cc_action, sequential=True), *rest]

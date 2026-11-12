@@ -196,7 +196,9 @@ def _compact(schema: Any, defs: dict, depth: int = 0) -> Any:
     if kind == 'array' or 'items' in schema:
         return [_compact(schema.get('items', {}), defs, depth + 1)]
     if kind == 'object' or 'properties' in schema:
-        required = set(schema.get('required') or [])
+        # A list of field names in JSON Schema; some specs put a boolean or object here instead.
+        req = schema.get('required')
+        required = {r for r in req if isinstance(r, str)} if isinstance(req, list) else set()
         return {
             k + ('*' if k in required else ''): _compact(v, defs, depth + 1)
             for k, v in (schema.get('properties') or {}).items()

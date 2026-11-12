@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     agent_reasoning_effort: Literal['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] = 'medium'
     subagents_max_concurrent: int = Field(default=6, ge=1)
     tool_result_max_chars: int = Field(default=40_000, ge=1000)
+    # How the agent reaches cableCORE's API routes (docs/adr: Code Mode A/B):
+    #   harness       cc_find -> cc_describe -> cc_action (ours)
+    #   codemode      cc_code: model-written JS against Cloudflare Code Mode in cableCORE_BE; data tools stay
+    #   codemode_all  cc_code with the data tools inside the code too (dc.search/get/related/formula)
+    cc_tool_mode: Literal['harness', 'codemode', 'codemode_all'] = 'harness'
+    codemode_url: str = 'http://127.0.0.1:5000/ai/codemode'
     # after-turn checks and titles (LangChain chat model); empty = the chat model above
     check_model: str = ''
     # LangSmith tracing of every model call (loop steps, checks, titles). Off by default: it sends chat

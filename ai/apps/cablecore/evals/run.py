@@ -18,7 +18,8 @@ import time
 import aiohttp
 
 from ai import TurnContext, http, run_turn, sandbox, user_message
-from ai.context import Answer, ApprovalCard, Card, Error, Items, TextDelta
+from ai.context import Answer, ApprovalCard, Card, Done, Error, Items, TextDelta
+from ai.settings import settings
 from ai.apps.cablecore import api
 
 HERE = pathlib.Path(__file__).parent
@@ -37,6 +38,17 @@ async def login() -> str:
 class Tickets:
     async def issue(self, user_id: str, chat_id: str) -> dict:
         return {'error': 'no sandbox gateway in eval runs'}
+
+
+def model_calls(items: list[dict]) -> int:
+    """Model requests in a turn: one per round of tool calls, plus the final answer."""
+    rounds, in_outputs = 0, False
+    for i in items:
+        if i['type'] == 'function_call_output' and not in_outputs:
+            rounds, in_outputs = rounds + 1, True
+        elif i['type'] != 'function_call_output':
+            in_outputs = False
+    return rounds + 1
 
 
 def summarize(items: list[dict]) -> tuple[str, list[dict]]:
@@ -68,7 +80,7 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
                 path = await sandbox.save_file(case['file'], (FILES / case['file']).read_bytes(), 'application/octet-stream', folder='uploads')
                 attachment = (case['file'], path)
             message = user_message(prompt, attachment, case.get('page', '/design'))
-            t0, first_token, answered, error, items = time.time(), None, None, None, []  # answered: last streamed text
+            t0, first_token, answered, error, items, usage = time.time(), None, None, None, [], {}  # answered: last streamed text
             async for e in run_turn(ctx, history, message):
                 if isinstance(e, TextDelta):
                     first_token = first_token or time.time() - t0
@@ -77,13 +89,17 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
                     error = e.message
                 elif isinstance(e, Items):
                     items = e.items
+                elif isinstance(e, Done):
+                    usage = e.usage
             history += items
             text, calls = summarize(items)
             latency = time.time() - t0
             turns.append({'prompt': prompt, 'latency_s': round(latency, 1), 'answer_s': round(answered or latency, 1), 'checked': True,
                           'first_token_s': round(first_token, 1) if first_token else None, 'error': error, 'answer': text,
-                          'tools': calls, 'confirmations': confirms})
-            print(f"{case['id']} {latency:.1f}s tools={len(calls)} err={error}", flush=True)
+                          'tools': calls, 'confirmations': confirms, 'mode': settings().cc_tool_mode,
+                          'model_calls': model_calls(items), 'usage': usage})
+            print(f"{case['id']} {latency:.1f}s model_calls={model_calls(items)} tools={len(calls)} "
+                  f"tokens={usage.get('input_tokens', 0)}+{usage.get('output_tokens', 0)} err={error}", flush=True)
         return {'id': case['id'], 'group': case.get('group'), 'chat_id': f"eval-{case['id']}", 'turns': turns}
 
 

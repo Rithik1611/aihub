@@ -7,6 +7,7 @@ import time
 from ai.apps.cablecore import api, notes
 from ai.apps.cablecore.related import SCHEMA_DIR
 from ai.context import TurnContext
+from ai.settings import settings
 from pathlib import Path
 
 PROMPT_FILE = Path(__file__).parent / 'prompt.md'
@@ -90,4 +91,67 @@ async def instructions(ctx: TurnContext) -> str:
     app_notes = notes.for_prompt()
     if app_notes:
         text = '# App notes (facts verified in earlier chats)\n' + app_notes + '\n\n' + text
+    return for_mode(text, settings().cc_tool_mode)
+
+
+# ---- CC_TOOL_MODE variants: only the lines about reaching the API (and, for codemode_all, the data
+# tools) change; the harness prompt is prompt.md as is.
+
+_CODE_API = (
+    '- `cc_code` — any operation the app has (1.5k routes: create, copy, update attributes, add processes, assign '
+    'to line items, catalogues, lookup tables, imports, exports, workflow…). Write ONE JavaScript function: find '
+    'routes with `codemode.search("2-4 words")`, read a route\'s exact input with `codemode.describe(path)`, call it '
+    'as `cablecore.<method>(...)`; loops, filters and calculations go in the same code, so one call does a whole '
+    'multi-step task. The catalogue below lists the main actions by id (method names replace "." with "_").'
+)
+_CODE_CHANGES = [
+    ('- Every change goes through `cc_action`.',
+     '- Every change goes through `cc_code`. A call that changes data pauses the run and the user gets an approval '
+     'card listing that exact call, so do not ask for approval in your reply: put the whole request in one function, '
+     'in order (copy, then update the copy using the id from the first result). Describe a route you have not used in '
+     'this chat before calling it. Attribute updates take attribute names (`{"name": "conductorCSA", "value": "240"}`).'),
+    ('- `cc_action` returns each action',
+     '- `cc_code` returns `status`, your function\'s `result` and the API calls made. After a change, read the affected '
+     'records back in the same function and return the stored values; report from that result only. If a value you set '
+     'is not in it, say so. A reply that changed data is checked automatically against what the calls did.'),
+    ('- When an action fails',
+     '- When the run fails, read the error and logs; check `codemode.describe`, the app notes, or the source '
+     '(`cc.code`), fix the code and run it again.'),
+]
+_DATA_IN_CODE = (
+    '- Data reads run inside `cc_code` as `dc.search({kind, query, fields})` (the app\'s search with its query '
+    'language: `conductorCSA>=50`, `armourMaterial="Round Wire"`, `STRANDING.conductorCSA=300`; with `fields` every '
+    'match comes back with those values), `dc.get({kind, ref})` (one design/enquiry/catalogue in full), '
+    '`dc.related({table, record, where, columns, order_by, limit})` (rows of any table in the data map, linked to a '
+    'record) and `dc.formula({attribute, process, design})` (the formula behind an attribute). Read and compare many '
+    'records in one function instead of one call each; check `total` and `more`.'
+)
+_DATA_TOOLS = ('`cc_search`', '`cc_get`', '`cc_related`', '`cc_formula`')
+
+
+def _replace_line(lines: list[str], prefix: str, new: str | None) -> None:
+    hits = [i for i, line in enumerate(lines) if line.startswith(prefix)]
+    if len(hits) != 1:
+        raise RuntimeError(f'prompt.md changed: expected one line starting {prefix!r} for CC_TOOL_MODE (found {len(hits)})')
+    if new is None:
+        del lines[hits[0]]
+    else:
+        lines[hits[0]] = new
+
+
+def for_mode(text: str, mode: str) -> str:
+    if mode == 'harness':
+        return text
+    lines = text.split('\n')
+    _replace_line(lines, '- `cc_find` → `cc_describe` → `cc_action`', _CODE_API)
+    for prefix, new in _CODE_CHANGES:
+        _replace_line(lines, prefix, new)
+    if mode == 'codemode_all':
+        _replace_line(lines, '- `cc_search`', _DATA_IN_CODE)
+        for name in _DATA_TOOLS[1:]:
+            _replace_line(lines, f'- {name}', None)
+    text = '\n'.join(lines).replace('comes back from `cc_action` with a `download_link`', 'comes back from your API call with a `download_link`')
+    if mode == 'codemode_all':
+        for name in _DATA_TOOLS:
+            text = text.replace(name, f'`dc.{name[4:-1]}`')
     return text
