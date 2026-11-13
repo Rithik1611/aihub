@@ -16,6 +16,8 @@ from ai.apps.cablecore import api, records
 
 TTL_S = 1800
 VALUES_SHOWN = 8
+LOCATIONS_MAX = 24  # value lookups per cc_attributes call (one DB query each)
+DEFAULT_SHARE = 0.9  # one value on this share of designs looks like a template default
 
 _keys: tuple[float, frozenset[str]] = (0.0, frozenset())
 _meta: tuple[float, dict[str, dict[str, Any]]] = (0.0, {})
@@ -88,25 +90,45 @@ def _usage(keys: list[str]) -> dict[str, int]:
     return usage
 
 
-async def find(token: str, words: list[str], process: str = '', limit: int = 15) -> tuple[int, list[dict[str, Any]]]:
-    """Index keys whose name or label contains any of the words, most used first, with their common values.
-    Returns (number of matching keys, the top `limit` of them)."""
+async def find(token: str, words: list[str], process: str = '', limit: int = 12) -> tuple[int, list[dict[str, Any]]]:
+    """Attributes whose name or label contains any of the words, grouped by name with every place the attribute
+    lives (design level as plant.<name>, processes as PROCESS.<name>), most used first, with common values.
+    Returns (number of matching attribute names, the top `limit` groups)."""
     keys, info = await index_keys(token), await meta()
     wanted = [w.lower().strip() for w in words if w.strip()]
-    prefix = f'{process.lower()}.' if process else ''
+    prefix = f'{process.lower()}.' if process and process.lower() != 'plant' else ''
+    only_plant = process.lower() == 'plant'  # design-level keys are unprefixed in the index
     hits = []
     for key in keys:
-        if prefix and not key.startswith(prefix):
+        if (prefix and not key.startswith(prefix)) or (only_plant and '.' in key):
             continue
         label = str((info.get(key) or {}).get('label') or '').lower()
         if any(w in key or w in label for w in wanted):
             hits.append(key)
     usage = await asyncio.to_thread(_usage, hits)
-    top = sorted(hits, key=lambda k: -usage.get(k, 0))[:limit]
-    found = await asyncio.gather(*(values((info.get(k) or {}).get('key', k)) for k in top))
+    groups: dict[str, list[str]] = {}
+    for key in hits:
+        groups.setdefault(key.split('.', 1)[-1], []).append(key)
+    # Most used attribute names first; within a name, design level first, then by use.
+    ranked = sorted(groups, key=lambda n: -sum(usage.get(k, 0) for k in groups[n]))[:limit]
+    locations = [k for n in ranked for k in sorted(groups[n], key=lambda k: ('.' in k, -usage.get(k, 0))) if usage.get(k, 0)][:LOCATIONS_MAX]
+    # ponytail: one query per location, concurrently; count in SQL instead if this shows up in latency
+    found = dict(zip(locations, await asyncio.gather(*(values((info.get(k) or {}).get('key', k)) for k in locations))))
     rows = []
-    for key, (count, common) in zip(top, found):
-        i = info.get(key) or {}
-        rows.append({'key': i.get('key', key), 'label': i.get('label'), 'type': i.get('type'), 'designs_with_value': count,
-                     'common_values': [f'{v} ({n})' for v, n in common]})
-    return len(hits), rows
+    for name in ranked:
+        first = info.get(groups[name][0]) or {}
+        where = []
+        for key in sorted(groups[name], key=lambda k: ('.' in k, -usage.get(k, 0))):
+            count, common = found.get(key, (0, []))
+            if not count:
+                continue
+            stored = (info.get(key) or {}).get('key', key)
+            loc: dict[str, Any] = {'key': stored if '.' in stored else f'plant.{stored}', 'designs_with_value': count,
+                                   'common_values': [f'{v} ({n})' for v, n in common]}
+            if common and common[0][1] >= DEFAULT_SHARE * count:
+                loc['warning'] = f'{common[0][0]} on {common[0][1] * 100 // count}% of designs: probably a template default, not a real value'
+            where.append(loc)
+        rows.append({'attribute': first.get('key', name).split('.')[-1], 'label': first.get('label'), 'type': first.get('type'),
+                     'keys': where or 'no design has a value for it',
+                     **({'note': 'lives in several places: search each real key and report per key'} if len(where) > 1 else {})})
+    return len(groups), rows

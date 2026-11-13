@@ -48,7 +48,9 @@ def _within(result: dict[str, Any], rows: list[dict[str, Any]], budget: int) -> 
 
 def _filter_text(f: dict[str, Any]) -> str | None:
     """One parsed filter back in the query language, to count it on its own; None for forms not rebuilt."""
-    field = f'{f["processName"]}.{f["field"]}' if f.get('processName') else f.get('field')
+    category = {'plant': 'plant', 'bom': 'bom', 'cableHeader': 'cable'}.get(str(f.get('category')))
+    field = (f'{f["processName"]}.{f["field"]}' if f.get('processName')
+             else f'{category}.{f["field"]}' if f.get('type') == 'category-attribute' and category else f.get('field'))
     op, value = f.get('operator'), f.get('value')
     quoted = f'"{value}"' if isinstance(value, str) and (' ' in value or op == 'phrase') else value
     forms = {'exact': f'{field}={quoted}', 'phrase': f'{field}={quoted}', 'gte': f'{field}>={value}', 'lte': f'{field}<={value}',
@@ -68,10 +70,11 @@ async def _name_hint(f: dict[str, Any], token: str) -> str:
     keys = await attributes.index_keys(token)
     field = str(f.get('field') or '').lower()
     key = f'{str(f["processName"]).lower()}.{field}' if f.get('processName') else field
+    shown = f'plant.{field}' if f.get('category') == 'plant' else key
     if key in keys:  # the key is right, so no design has this value
         stored = ((await attributes.meta()).get(key) or {}).get('key', key)
         _count, common = await attributes.values(stored)
-        return f'; most common values of {stored}: {", ".join(f"{v} ({n})" for v, n in common)}' if common else ''
+        return f'; most common values of {shown}: {", ".join(f"{v} ({n})" for v, n in common)}' if common else ''
     if f.get('processName'):
         processes = sorted({k.split('.', 1)[0] for k in keys if k.endswith(f'.{field}')})
         if processes:
@@ -109,28 +112,29 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     """
     Search the user's DesignCenter data the way the app's search screens do. Use this first for any
     question about their designs/cables or enquiries.
-    Query language (one string, all parts ANDed):
-      attribute=value         conductorType=CU   armourMaterial="Round Wire"   voltage="0.6/1"
-      comparisons / ranges    conductorCSA>=50   conductorCSA between 16 and 25
-      lists / patterns        conductorCSA in (95,120)   description like %XLPE%   designId contains LV
-      process attributes      STRANDING.conductorCSA=300
-      missing values          referenceStandard is null / is not null
+    Query language (one string, all parts ANDed), keys exactly as cc_attributes returns them:
+      design attribute        plant.conductorType=CU   plant.armourMaterial="Round Wire"   plant.voltage="0.6/1"
+      process attribute       LAYUP.noElements=3   STRANDING.conductorCSA=300
+      comparisons / ranges    plant.conductorCSA>=50   plant.conductorCSA between 16 and 25
+      lists / patterns        plant.conductorCSA in (95,120)   description like %XLPE%   designId contains LV
+      missing values          plant.referenceStandard is null  (only designs that HAVE the attribute with no value)
       records                 designId=LV-7034   designId contains 7034   enquiryId=ENQ-0214   customerName="Cable_World"
-    Only filters: free-text words are refused (they match loosely across many fields). Filter on attribute keys
-    from the search index: cc_attributes finds the key for a property (e.g. what holds the number of cores) with
-    its stored values; do not guess names. `description like %…%` is a fallback for a property with no attribute.
-    When nothing matches, the answer says how many each filter matches on its own, flags keys the index does not
-    have, and lists a key's common values.
+    Only filters: free-text words are refused. A key without a prefix matches the attribute in ANY process
+    (a template default in one process then pollutes the count): always use the prefixed key. Get keys from
+    cc_attributes, never from memory; `description like %…%` only for a property with no attribute.
+    Designs: `designs` is the number of distinct designs (the index holds every version of a design; rows
+    are de-duplicated to the latest version). When nothing matches, the answer says how many each filter
+    matches on its own, flags keys the index does not have, and lists a key's common values.
 
     :param kind: design or enquiry
     :param query: the search in the query language above
     :param page: result page (1-based)
     :param page_size: rows per page, max 20
     :param plant: only when the user names a plant; empty searches every plant they can access
-    :param fields: designs only: attribute values to add to every row, as header names (voltage, conductorCSA) or
-        PROCESS.attribute (INSULATING_MV.nomThickness). With fields and at most 300 matches, all pages are read,
-        so one call lists every match with the values to compare.
-    :return: total, parsedQuery and compact rows (code, id, plant, status, and the fields asked for)
+    :param fields: designs only: attribute values to add to every row, as keys (plant.voltage, plant.conductorCSA,
+        INSULATING_MV.nomThickness). With fields and at most 300 matches, all pages are read, so one call lists
+        every match with the values to compare.
+    :return: designs (distinct), parsedQuery and compact rows (code, id, plant, status, and the fields asked for)
     """
     token = _token(ctx)
     path = {'design': '/os/designs/search', 'enquiry': '/os/enquiries/search'}.get(kind)
@@ -150,35 +154,100 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
                            'parsedQuery': parsed}, ensure_ascii=False)
     if total == 0:
         return json.dumps({'total': 0, 'parsedQuery': parsed, 'why': await _why_empty(path, token, body, parsed, kind)}, ensure_ascii=False)
-    result: dict[str, Any] = {'total': total, 'parsedQuery': parsed}
-    if fields and kind == 'design':
-        read_all = isinstance(total, int) and total <= FIELDS_READ_ALL_MAX
-        while isinstance(total, int) and read_all and len(rows) < total:
-            body['page'] += 1
-            status, more = await api.call('POST', path, token, body=body)
-            if api.failed(status, more) or not (more or {}).get('data'):
-                break
-            rows += more['data']
-        if not read_all:
-            result['note'] = f'{total} matches: too many to compare, showing page {page}. Add filters to compare them all.'
-        refs = [str(r.get(k)) for r in rows for k in ('designId', 'code', 'id', 'designVersionId') if r.get(k)]
-        values = await asyncio.to_thread(records.values_for, refs, fields)
-        for r in rows:
-            ref = next((str(r[k]) for k in ('designId', 'code', 'id', 'designVersionId') if r.get(k) and str(r[k]) in values), None)
+    if kind != 'design':
+        result: dict[str, Any] = {'total': total, 'parsedQuery': parsed, 'page': page,
+                                  'more': isinstance(total, int) and total > (page - 1) * body['pageSize'] + len(rows)}
+        return _within(result, [_compact_row(kind, r) for r in rows], SEARCH_MAX_CHARS)
+    # Designs: the index holds every version of a design, so rows are read in bulk, de-duplicated to the latest
+    # version, and counted as distinct designs; `designs` comes from the index's distinct-designId endpoint.
+    rows, complete = await _design_rows(path, token, body, rows, total)
+    unique = _latest_versions(rows)
+    designs = len(unique) if complete else await _distinct_designs(token, query, plant)
+    result = {'designs': designs, 'rows_in_index': total, 'parsedQuery': parsed}
+    if note := await _null_note(parsed):
+        result['note'] = note
+    if fields:
+        if not complete:
+            result['note'] = f'{designs} designs: too many to compare in one call, showing the first {len(unique)}. Add filters.'
+        refs = [str(r.get(k)) for r in unique for k in ('designId', 'id') if r.get(k)]
+        wanted = {f: f.removeprefix('plant.') for f in fields}  # values_for takes design-level names unprefixed
+        values = await asyncio.to_thread(records.values_for, refs, list(wanted.values()))
+        for r in unique:
+            ref = next((str(r[k]) for k in ('designId', 'id') if r.get(k) and str(r[k]) in values), None)
             r.update(values[ref] if ref else {})
-        result['more'] = isinstance(total, int) and total > len(rows)
-        return _within(result, [{**_compact_row(kind, r), **{f: r.get(f) for f in fields}} for r in rows], SEARCH_MAX_CHARS)
-    # The answer is complete only on the last page.
-    result.update(page=page, more=isinstance(total, int) and total > (page - 1) * body['pageSize'] + len(rows))
-    return _within(result, [_compact_row(kind, r) for r in rows], SEARCH_MAX_CHARS)
+        result['more'] = not complete
+        return _within(result, [{**_compact_row(kind, r), **{f: r.get(n) for f, n in wanted.items()}} for r in unique], SEARCH_MAX_CHARS)
+    size = body['pageSize']
+    shown = unique[(page - 1) * size: page * size]
+    result.update(page=page, more=len(unique) > page * size or not complete)
+    return _within(result, [_compact_row(kind, r) for r in shown], SEARCH_MAX_CHARS)
+
+
+async def _null_note(parsed: dict[str, Any] | None) -> str:
+    """`key is null` matches only designs that have the attribute with an empty value, so say how many have it at all."""
+    for f in (parsed or {}).get('filters') or []:
+        if isinstance(f, dict) and f.get('operator') == 'null' and f.get('type') != 'top-level':
+            field = str(f.get('field') or '')
+            key = f"{f['processName']}.{field}" if f.get('processName') else field
+            stored = ((await attributes.meta()).get(key.lower()) or {}).get('key', key)
+            with_value = await asyncio.to_thread(records.designs_with_attribute, stored)
+            designs = await asyncio.to_thread(records.design_count)
+            return (f'"is null" counts only designs that have {stored} with an empty value. {with_value} of {designs} designs '
+                    f'have a value for it; the other {designs - with_value} have no {stored} at all and are not counted here.')
+    return ''
+
+
+BULK_PAGE = 100
+BULK_ROWS_MAX = 500  # versions read per search; beyond this the distinct count comes from the index
+
+
+async def _design_rows(path: str, token: str, body: dict[str, Any], first: list[dict[str, Any]], total: Any) -> tuple[list[dict[str, Any]], bool]:
+    """Rows of the search up to BULK_ROWS_MAX (pages of BULK_PAGE); complete = every row of the search was read."""
+    if not isinstance(total, int) or total <= len(first):
+        return first, True
+    rows: list[dict[str, Any]] = []
+    page = 1
+    while len(rows) < min(total, BULK_ROWS_MAX):
+        status, data = await api.call('POST', path, token, body={**body, 'page': page, 'pageSize': BULK_PAGE})
+        if api.failed(status, data) or not (data or {}).get('data'):
+            break
+        rows += data['data']
+        page += 1
+    return rows, len(rows) >= total
+
+
+def _latest_versions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per design code: its highest version, in the order designs first appear."""
+    best: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        code = str(r.get('designId') or r.get('id'))
+        if code not in best or _version(r) > _version(best[code]):
+            best[code] = r
+    return list(best.values())
+
+
+def _version(row: dict[str, Any]) -> float:
+    try:
+        return float(row.get('version') or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def _distinct_designs(token: str, query: str, plant: str) -> int | None:
+    """Distinct design codes matching the query, from the index (all plants; None when unavailable)."""
+    if plant:
+        return None
+    status, data = await api.call('GET', '/os/designs/distinct/designId', token, query={'q': query, 'size': 10000})
+    return None if api.failed(status, data) else (data or {}).get('total')
 
 async def cc_attributes(ctx: TurnContext, words: list[str], process: str = '') -> str:
     """
     Find the search key for a design property before filtering on it, from the search index itself (not from
-    memory): every index key whose name or label contains one of the words, most used first, with its label,
-    type, how many designs have a value, and the most common stored values. Give the words the app may use and
-    your own synonyms: a property can be named differently from everyday terms (cores may be "elements" of a
-    lay-up process), and the same property can exist on several processes (one per product class).
+    memory): every attribute whose name or label contains one of the words, most used first, with every place it
+    lives (`plant.<key>` at design level, `PROCESS.<key>` per process), how many designs have a value there, and
+    the most common stored values. Give the words the app may use and your own synonyms: a property can be
+    named differently from everyday terms (cores may be "elements" of a lay-up process). An attribute that lives
+    in several places holds the same property for different product classes or plants: search each real key.
 
     :param words: words for the property, e.g. ["core", "element"], ["sheath", "jacket"], ["voltage"]
     :param process: only keys of this process, e.g. LAYUP
@@ -187,7 +256,7 @@ async def cc_attributes(ctx: TurnContext, words: list[str], process: str = '') -
     total, rows = await attributes.find(_token(ctx), words, process)
     if not rows:
         return f'No key in the search index contains {", ".join(words)}. Try other words (synonyms, abbreviations).'
-    return json.dumps({'matching_keys': total, 'shown': len(rows), 'keys': rows}, ensure_ascii=False)
+    return json.dumps({'matching_attributes': total, 'shown': len(rows), 'attributes': rows}, ensure_ascii=False)
 
 
 async def cc_get(ctx: TurnContext, kind: Literal['design', 'enquiry', 'catalogue'], ref: str, process: str = '') -> str:

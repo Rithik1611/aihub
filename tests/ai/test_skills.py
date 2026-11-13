@@ -84,9 +84,11 @@ def test_cc_search_refuses_free_text(monkeypatch):
     from ai.apps.cablecore.tools import cc_search
     from ai.context import TurnContext
 
-    async def fake_call(method, path, token, body=None, **kw):
+    async def fake_call(method, path, token, body=None, query=None, **kw):
+        if method == 'GET':  # the distinct-designId count
+            return 200, {'values': ['LV-1'], 'total': 1}
         terms = [w for w in body['query'].split() if '=' not in w]
-        return 201, {'data': [{'designId': 'LV-1'}], 'pagination': {'total': 4931},
+        return 201, {'data': [{'designId': 'LV-1', 'version': 0}], 'pagination': {'total': 1},
                      'parsedQuery': {'filters': [], 'textTerms': terms, 'orGroups': []}}
 
     monkeypatch.setattr(api, 'call', fake_call)
