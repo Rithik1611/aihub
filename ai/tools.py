@@ -33,9 +33,15 @@ class Tool:
     # Waits on the user (an approval card, a question): runs alone, in order; other calls of a step run concurrently.
     sequential: bool = False
     args_model: type[BaseModel] | None = None  # None: the callee validates (sandbox tools, from its own OpenAPI)
+    # With TOOL_SEARCH on, sent with defer_loading: hidden from the model until it finds it with tool search.
+    defer: bool = False
+    raw_spec: dict[str, Any] | None = None  # a provider tool (e.g. tool_search) sent as is
 
     def spec(self) -> dict[str, Any]:
-        return {'type': 'function', 'name': self.name, 'description': self.description, 'parameters': self.parameters}
+        if self.raw_spec is not None:
+            return self.raw_spec
+        spec = {'type': 'function', 'name': self.name, 'description': self.description, 'parameters': self.parameters}
+        return {**spec, 'defer_loading': True} if self.defer and settings().tool_search else spec
 
 
 def _allows_none(annotation: Any) -> bool:
@@ -63,7 +69,7 @@ def _clean(node: Any, defs: dict[str, Any]) -> Any:
     return {k: _clean(v, defs) for k, v in schema.items() if k not in ('title', 'default', '$defs')}
 
 
-def tool(fn: ToolFn, sequential: bool = False, name: str = '') -> Tool:
+def tool(fn: ToolFn, sequential: bool = False, name: str = '', defer: bool = False) -> Tool:
     name = name or fn.__name__
     doc = inspect.getdoc(fn) or ''
     description = doc.split('\n:param')[0].split('\n:return')[0].strip()
@@ -80,7 +86,7 @@ def tool(fn: ToolFn, sequential: bool = False, name: str = '') -> Tool:
     raw = model.model_json_schema()
     parameters = _clean(raw, raw.get('$defs', {}))
     parameters.setdefault('required', [])
-    return Tool(name, description, parameters, fn, sequential, model)
+    return Tool(name, description, parameters, fn, sequential, model, defer)
 
 
 def cap(text: str) -> str:

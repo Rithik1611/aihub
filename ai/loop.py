@@ -32,7 +32,7 @@ When done, end with a clear summary:
 # Fields the Responses API accepts back as input, per item type (Azure rejects e.g. `status` on reasoning).
 _INPUT_FIELDS = {
     'message': {'type', 'role', 'content'},
-    'function_call': {'type', 'call_id', 'name', 'arguments', 'id'},
+    'function_call': {'type', 'call_id', 'name', 'arguments', 'id', 'namespace'},  # namespace: tools loaded by tool search
     'function_call_output': {'type', 'call_id', 'output'},
     'reasoning': {'type', 'id', 'summary', 'encrypted_content'},
 }

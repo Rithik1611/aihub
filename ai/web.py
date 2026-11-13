@@ -144,4 +144,4 @@ async def _get_public(url: str) -> tuple[bytes, str, str]:
     raise ValueError(f'Too many redirects from {url}')
 
 
-TOOLS = [tool(search_web), tool(fetch_url)]
+TOOLS = [tool(search_web, defer=True), tool(fetch_url, defer=True)]  # found by tool search when it is on

@@ -58,9 +58,12 @@ ai/
   ask_user.py     question card          web.py   search_web, fetch_url
   sandbox.py      sandbox tools (from Open Terminal's OpenAPI), file read/save
   titles.py       chat title
+  skills.py       skills (knowledge loaded on demand), load_skill, tool search
+  skills/         core skills (chat-output)
   apps/cablecore/ the cableCORE app: api, index, actions, records, related, formula, notes,
                   tools, prompt.md/prompt.py, hooks (after-turn checks), app_notes.md,
-                  sandbox/ (image + start script), evals/ (145 cases, runner, grader)
+                  skills/ (searching, action-catalogue, data-model, schema, sandbox-analysis),
+                  sandbox/ (image + start script), evals/ (145 cases, runner, grader, scoreboard)
 ```
 
 A new app is a new folder in `apps/` exposing `instructions(ctx)`, `tools()` and `after_turn(ctx, request, reply)`;
@@ -79,10 +82,29 @@ A new app is a new folder in `apps/` exposing `instructions(ctx)`, `tools()` and
 | `CC_INDEX_TTL_S` | `1800` | route index / prompt rebuild interval |
 | `AGENT_REASONING_EFFORT`, `AGENT_MAX_STEPS`, `SUBAGENTS_MAX_CONCURRENT`, `TOOL_RESULT_MAX_CHARS` | medium, 100, 6, 40000 | loop |
 | `CHECK_MODEL` | the chat model | model for the after-turn checks and titles |
+| `TOOL_SEARCH` | off | sandbox and web tools hidden until the model finds them with the Responses API tool search |
 | `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` | off | LangSmith tracing of every model call. Sends chat content to LangSmith: use a self-hosted endpoint or clear it first |
 | `LANGFUSE_TRACING`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | off | Langfuse tracing (self-hosted): one trace per chat turn, session = chat, every model call nested under it. Traces contain chat content |
 
 All are declared and validated in [settings.py](settings.py).
+
+## Context: what each request carries
+
+The system prompt holds only what nearly every turn needs: role, tools, rules for changes, key facts, the app
+notes, and one line per skill. Everything else is disclosed when the model asks for it:
+
+- **Skills** ([skills.py](skills.py)): a folder with `SKILL.md` (a `---` header with `name` and a `description`
+  saying when it helps, then the body). The prompt lists the descriptions; `load_skill(name)` returns the body as a
+  tool result. Core skills are in `ai/skills/`, an app's in `apps/<app>/skills/`. Write knowledge (formats,
+  facts, examples), not steps the model must follow; keep a body under 12k characters and put more in files the
+  body names (`load_skill(name, file)`). `{{PLACEHOLDERS}}` are filled by the app (`prompt.fill`).
+- **Tool search** (`TOOL_SEARCH=true`): tools built with `defer=True` (sandbox, web, the sandbox ticket) are sent
+  with `defer_loading`; the model loads them through the provider's tool search when it needs them.
+- **Tool results** carry what the next decision needs: `cc_search` returns compact rows, cuts by whole rows
+  (valid JSON), and on zero matches says how many each filter matches alone and which field names do not exist.
+
+Measure a change with the eval runner plus `evals/scoreboard.py` (steps, tool calls, uncached/cached tokens,
+time, grade per case, read from Langfuse).
 
 ## LangChain
 

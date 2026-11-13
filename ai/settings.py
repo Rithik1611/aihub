@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     tool_result_max_chars: int = Field(default=40_000, ge=1000)
     # after-turn checks and titles (LangChain chat model); empty = the chat model above
     check_model: str = ''
+    # Tool search (Responses API, gpt-5.4+): tools marked `defer` (sandbox, web) are hidden until the model
+    # searches for them. Off: every tool's definition is sent with every request.
+    tool_search: bool = False
     # LangSmith tracing of every model call (loop steps, checks, titles). Off by default: it sends chat
     # content to LangSmith (LANGSMITH_API_KEY, LANGSMITH_PROJECT, LANGSMITH_ENDPOINT for self-hosted).
     langsmith_tracing: bool = False
