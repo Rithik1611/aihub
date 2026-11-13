@@ -6,6 +6,7 @@ Read as the `ai_reader` role (SELECT only), so this never changes data.
 import asyncio
 import json
 import re
+import time
 from datetime import date, datetime
 from typing import Any, cast
 
@@ -223,6 +224,22 @@ def values_for(codes: list[str], fields: list[str]) -> dict[str, dict]:
     for r in versions:  # findable by code, design id or version id
         out[str(r['id'])] = out[r['did']] = out[r['code']]
     return out
+
+
+_names: tuple[float, set[str], dict[str, set[str]]] | None = None
+
+
+def attribute_names() -> tuple[set[str], dict[str, set[str]]]:
+    """Design attribute names: plant (header) names, and process attribute name -> processes that have it.
+    Lets a search that matched nothing say a filter's field does not exist. Cached for 30 minutes."""
+    global _names
+    if _names is None or time.monotonic() - _names[0] > 1800:
+        plant = {r['name'] for r in _rows('select distinct name from "PlantAttribute"')}
+        process: dict[str, set[str]] = {}
+        for r in _rows('select distinct a.name, pr.name as process from "ProcessAttribute" a join "Process" pr on pr.id = a."processId"'):
+            process.setdefault(r['name'], set()).add(r['process'])
+        _names = (time.monotonic(), plant, process)
+    return _names[1], _names[2]
 
 
 async def get(kind: str, ref: str) -> dict | None:

@@ -2,12 +2,17 @@
 describe -> action with approval), app notes, and the sandbox's read ticket."""
 
 import asyncio
+import difflib
 import json
 from typing import Any, Literal
 
-from ai.apps.cablecore import actions as harness, api, formula, index, notes, records, related
+from ai import skills
+from ai.apps.cablecore import actions as harness
+from ai.apps.cablecore import api, formula, index, notes, records, related
 from ai.apps.cablecore.actions import Action
+from ai.apps.cablecore.prompt import SKILLS, fill
 from ai.context import TurnContext
+from ai.settings import settings
 from ai.tools import Tool, tool
 
 
@@ -17,13 +22,81 @@ def _token(ctx: TurnContext) -> str:
     return ctx.cc_token
 
 
-def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
-    keep: dict[str, Any] = {}
-    for key, value in row.items():
-        if value in (None, '', [], {}) or isinstance(value, (dict, list)):
-            continue
-        keep[key] = value if not isinstance(value, str) else value[:160]
-    return keep
+# What a search row is worth showing; the rest are internal ids, timestamps and flags.
+_ROW_KEYS = {
+    'design': ('designId', 'id', 'plant', 'productClassification', 'workflowStatus', 'version', 'Item Nature'),
+    'enquiry': ('enquiryId', 'id', 'customerName', 'plant', 'status', 'priority', 'version'),
+}
+SEARCH_MAX_CHARS = 16_000
+FIELDS_READ_ALL_MAX = 300  # with fields, every page is read when there are at most this many matches
+
+
+def _compact_row(kind: str, row: dict[str, Any]) -> dict[str, Any]:
+    return {k: row[k] for k in _ROW_KEYS[kind] if row.get(k) not in (None, '')}
+
+
+def _within(result: dict[str, Any], rows: list[dict[str, Any]], budget: int) -> str:
+    """The result as JSON with as many whole rows as fit the budget: always valid JSON, never cut mid-row."""
+    kept = len(rows)
+    while True:
+        text = json.dumps({**result, 'returned': kept, 'rows': rows[:kept]}, ensure_ascii=False, default=str)
+        if len(text) <= budget or kept == 0:
+            return text
+        kept = max(0, kept * budget // len(text) - 1)  # shrink in proportion, then re-measure
+        result = {**result, 'cut': f'{len(rows) - kept} more rows were read but not shown; narrow the query (add filters).'}
+
+
+def _filter_text(f: dict[str, Any]) -> str | None:
+    """One parsed filter back in the query language, to count it on its own; None for forms not rebuilt."""
+    field = f'{f["processName"]}.{f["field"]}' if f.get('processName') else f.get('field')
+    op, value = f.get('operator'), f.get('value')
+    quoted = f'"{value}"' if isinstance(value, str) and (' ' in value or op == 'phrase') else value
+    forms = {'exact': f'{field}={quoted}', 'phrase': f'{field}={quoted}', 'gte': f'{field}>={value}', 'lte': f'{field}<={value}',
+             'gt': f'{field}>{value}', 'lt': f'{field}<{value}', 'contains': f'{field} contains {value}',
+             'null': f'{field} is null', 'not_null': f'{field} is not null'}
+    if op == 'in' and isinstance(value, list):
+        return f'{field} in ({",".join(str(v) for v in value)})'
+    if op == 'between' and isinstance(value, list) and len(value) == 2:
+        return f'{field} between {value[0]} and {value[1]}'
+    return forms.get(str(op))
+
+
+def _name_hint(f: dict[str, Any], plant_names: set[str], process_names: dict[str, set[str]]) -> str:
+    """Why a filter on its own matched nothing, when the field name is the cause."""
+    field = str(f.get('field'))
+    if f.get('processName'):
+        processes = process_names.get(field)
+        if processes and f['processName'] not in processes:
+            return f'; process {f["processName"]} has no attribute {field} (processes that do: {", ".join(sorted(processes)[:6])})'
+        return ''
+    if field in plant_names or field in process_names:
+        return ''
+    lower = {n.lower(): n for n in plant_names}
+    close = [lower[n] for n in difflib.get_close_matches(field.lower(), list(lower), n=3, cutoff=0.5)]
+    return f'; {field} is not a design attribute' + (f' (similar: {", ".join(close)})' if close else '')
+
+
+async def _why_empty(path: str, token: str, body: dict[str, Any], parsed: dict[str, Any] | None) -> str:
+    """For a search that matched nothing: how many each filter matches on its own, so the one to change is clear."""
+    filters = [f for f in (parsed or {}).get('filters') or [] if isinstance(f, dict)]
+    texts = [_filter_text(f) for f in filters]
+    if len(filters) < 2 and not (filters and texts[0]):
+        return 'No matches.'
+
+    async def count(text: str) -> Any:
+        status, data = await api.call('POST', path, token, body={**body, 'query': text, 'page': 1, 'pageSize': 1})
+        return None if api.failed(status, data) else ((data or {}).get('pagination') or {}).get('total')
+
+    counts = await asyncio.gather(*(count(t) for t in texts if t))
+    plant_names, process_names = await asyncio.to_thread(records.attribute_names)
+    lines, it = [], iter(counts)
+    for f, text in zip(filters, texts):
+        if text:
+            n = next(it)
+            lines.append(f'{text} -> {n} alone' + (_name_hint(f, plant_names, process_names) if n == 0 else ''))
+    if len(lines) == 1:
+        return f'No matches: {lines[0]}'
+    return 'Nothing matches all filters together. Each filter on its own:\n' + '\n'.join(lines)
 
 
 async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query: str, page: int = 1, page_size: int = 20, plant: str = '',
@@ -32,14 +105,15 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     Search the user's DesignCenter data the way the app's search screens do. Use this first for any
     question about their designs/cables or enquiries.
     Query language (one string, all parts ANDed):
-      attribute=value         conductorType=CU   armourMaterial="Round Wire"   noOfCores=3
+      attribute=value         conductorType=CU   armourMaterial="Round Wire"   voltage="0.6/1"
       comparisons / ranges    conductorCSA>=50   conductorCSA between 16 and 25
-      lists / patterns        conductorCSA in (95,120)   description like '%XLPE%'   cableCode contains SWA
-      process attributes      STRANDING.conductorCSA=300   INSULATION.material=XLPE
+      lists / patterns        conductorCSA in (95,120)   description like %XLPE%   designId contains LV
+      process attributes      STRANDING.conductorCSA=300
       missing values          referenceStandard is null / is not null
-      free words              matched as text (codes, descriptions): "LV-7034", 60502-1, 2XWY
-    Attribute names are the ones cc_get shows in a design's header/process values. Check `parsedQuery` in the
-    answer: words it treated as text instead of filters may need a field=value form.
+      free words              fuzzy text over codes and descriptions: LV-7034, 2XWY
+    Attribute names are the ones cc_get shows in a design's header/process values. Free words match loosely
+    (a total in the thousands means they matched almost everything): narrow with attribute filters. When
+    nothing matches, the answer says how many each filter matches on its own and flags unknown field names.
 
     :param kind: design or enquiry
     :param query: the search in the query language above
@@ -47,9 +121,9 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     :param page_size: rows per page, max 20
     :param plant: only when the user names a plant; empty searches every plant they can access
     :param fields: designs only: attribute values to add to every row, as header names (voltage, conductorCSA) or
-        PROCESS.attribute (INSULATING_MV.nomThickness). With fields, all pages are read (up to 300 designs), so one
-        call lists every match with the values to compare.
-    :return: total, parsedQuery and compact rows (code, id, plant, status, key values, and the fields asked for)
+        PROCESS.attribute (INSULATING_MV.nomThickness). With fields and at most 300 matches, all pages are read,
+        so one call lists every match with the values to compare.
+    :return: total, parsedQuery and compact rows (code, id, plant, status, and the fields asked for)
     """
     token = _token(ctx)
     path = {'design': '/os/designs/search', 'enquiry': '/os/enquiries/search'}.get(kind)
@@ -61,36 +135,32 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
         return f'Search failed: {error}'
     rows = (data or {}).get('data') or []
     total = ((data or {}).get('pagination') or {}).get('total')
+    parsed = (data or {}).get('parsedQuery')
+    if total == 0:
+        return json.dumps({'total': 0, 'parsedQuery': parsed, 'why': await _why_empty(path, token, body, parsed)}, ensure_ascii=False)
+    result: dict[str, Any] = {'total': total, 'parsedQuery': parsed}
     if fields and kind == 'design':
-        while isinstance(total, int) and len(rows) < min(total, 300):
+        read_all = isinstance(total, int) and total <= FIELDS_READ_ALL_MAX
+        while isinstance(total, int) and read_all and len(rows) < total:
             body['page'] += 1
             status, more = await api.call('POST', path, token, body=body)
             if api.failed(status, more) or not (more or {}).get('data'):
                 break
             rows += more['data']
+        if not read_all:
+            result['note'] = f'{total} matches: too many to compare, showing page {page}. Add filters to compare them all.'
         refs = [str(r.get(k)) for r in rows for k in ('designId', 'code', 'id', 'designVersionId') if r.get(k)]
         values = await asyncio.to_thread(records.values_for, refs, fields)
         for r in rows:
             ref = next((str(r[k]) for k in ('designId', 'code', 'id', 'designVersionId') if r.get(k) and str(r[k]) in values), None)
             r.update(values[ref] if ref else {})
-        return json.dumps({'total': total, 'returned': len(rows), 'more': isinstance(total, int) and total > len(rows),
-                           'parsedQuery': (data or {}).get('parsedQuery'),
-                           'rows': [{**_compact_row(r), **{f: r.get(f) for f in fields}} for r in rows]},
-                          ensure_ascii=False, default=str)[:30000]
-    return json.dumps(
-        {
-            'total': total,
-            'page': page,
-            # The answer is complete only on the last page.
-            'more': isinstance(total, int) and total > (page - 1) * body['pageSize'] + len(rows),
-            'parsedQuery': (data or {}).get('parsedQuery'),
-            'rows': [_compact_row(r) for r in rows],
-        },
-        ensure_ascii=False,
-        default=str,
-    )[:12000]
+        result['more'] = isinstance(total, int) and total > len(rows)
+        return _within(result, [{**_compact_row(kind, r), **{f: r.get(f) for f in fields}} for r in rows], SEARCH_MAX_CHARS)
+    # The answer is complete only on the last page.
+    result.update(page=page, more=isinstance(total, int) and total > (page - 1) * body['pageSize'] + len(rows))
+    return _within(result, [_compact_row(kind, r) for r in rows], SEARCH_MAX_CHARS)
 
-async def cc_get(ctx: TurnContext, kind: Literal['design', 'enquiry', 'catalogue'], ref: str) -> str:
+async def cc_get(ctx: TurnContext, kind: Literal['design', 'enquiry', 'catalogue'], ref: str, process: str = '') -> str:
     """
     One record in full, as stored now: a design (header values, every process with its values, BOM,
     workflow state, versions), an enquiry (header, line items with their designs, files) or a catalogue
@@ -98,12 +168,20 @@ async def cc_get(ctx: TurnContext, kind: Literal['design', 'enquiry', 'catalogue
 
     :param kind: design, enquiry or catalogue
     :param ref: design code (LV-7034), enquiry code (ENQ-0216), catalogue name, or an id
+    :param process: designs only: just this process's values (e.g. INSULATION), for a design too big to show whole
     :return: the record as JSON
     """
     _token(ctx)  # a chat without a cableCORE session gets no data
     record = await records.get(kind, ref)
     if not record:
         return f'No {kind} matches {ref!r}. Search with cc_search.'
+    if process:
+        processes = record.get('processes') or []
+        chosen = [p for p in processes if str(p.get('process', '')).lower() == process.lower()]
+        if not chosen:
+            return f'{ref} has no process {process!r}; its processes: {", ".join(str(p.get("process")) for p in processes)}'
+        identity = {k: v for k, v in record.items() if k not in ('processes', 'bom', 'header')}
+        return records.clip({**identity, 'processes': chosen})
     return records.clip(record)
 
 async def cc_related(ctx: TurnContext, table: str, record: str = '', where: dict[str, Any] | None = None, columns: list[str] | None = None, order_by: str = '',
@@ -242,5 +320,7 @@ async def cablecore_api_access(ctx: TurnContext, purpose: str) -> str:
 
 
 def tools() -> list[Tool]:
+    found = [skills.tool_search_tool()] if settings().tool_search else []
     return [tool(cc_search), tool(cc_get), tool(cc_related), tool(cc_formula), tool(cc_find), tool(cc_describe),
-            tool(cc_action, sequential=True), tool(cc_note), tool(cablecore_api_access, sequential=True)]
+            tool(cc_action, sequential=True), tool(cc_note), tool(cablecore_api_access, sequential=True, defer=True),
+            skills.load_skill_tool(SKILLS, fill), *found]
