@@ -24,20 +24,12 @@ class ChatSession(Base):
     )
     # No foreign key: the Account table lives in cableCORE's database.
     account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    name: Mapped[str] = mapped_column(
-        String(100), nullable=False, server_default=DEFAULT_SESSION_NAME
-    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False, server_default=DEFAULT_SESSION_NAME)
     is_pinned: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
-    suggestions: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
-    )
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    suggestions: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     # Ordering for the session list depends on this being bumped on every turn.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -74,9 +66,13 @@ class ChatMessage(Base):
         "metadata",
         JSONB(none_as_null=True),  # type: ignore[no-untyped-call]  # JSONB.__init__ is untyped upstream
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+    # The agent's own record of the turn this AI message ends (docs/adr/0009):
+    # {"covered": [message ids the items already contain], "items": [Responses API items]}.
+    # Replayed as history so the model keeps its tool calls and results; never sent to the client.
+    agent_items: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True)  # type: ignore[no-untyped-call]  # JSONB.__init__ is untyped upstream
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     session: Mapped[ChatSession] = relationship(back_populates="messages")
 

@@ -29,9 +29,7 @@ def settings(limit: int = 3, window: int = 60) -> Settings:
 
 
 def caller(account_id: uuid.UUID) -> Caller:
-    return Caller.model_validate(
-        {"sub": str(account_id), "activePlantId": str(PLANT), "canAccessAi": True}
-    )
+    return Caller.model_validate({"sub": str(account_id), "activePlantId": str(PLANT), "canAccessAi": True})
 
 
 async def test_allows_requests_up_to_the_limit() -> None:

@@ -4,6 +4,8 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
+from ai import http as ai_http
+from ai import settings as ai_settings
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -12,6 +14,7 @@ from app.chat.router import router as chat_router
 from app.core.config import Settings, get_settings
 from app.core.db import dispose_engine
 from app.health.router import router as health_router
+from app.sandbox.router import router as sandbox_router
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +28,15 @@ def _configure(settings: Settings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Own the connection pool for the life of the app.
+    """Own the agent's and the database's resources for the life of the app.
 
     Without the dispose, pooled connections stay open through shutdown and reload,
     leaking server-side sessions until Postgres times them out.
     """
+    if not settings.ai_stub:
+        ai_settings.require()  # the agent's keys: fail at startup, not mid-chat
     yield
+    await ai_http.close()
     await dispose_engine()
 
 
@@ -53,9 +59,7 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def security_headers(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
+async def security_headers(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """Responses carry a user's conversations, so nothing between aihub and the
     browser should sniff, frame or cache them."""
     response = await call_next(request)
@@ -76,3 +80,4 @@ async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
 # One line per feature module; each owns its own prefix and tags.
 app.include_router(health_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
+app.include_router(sandbox_router, prefix="/api")

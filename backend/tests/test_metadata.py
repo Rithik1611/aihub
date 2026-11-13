@@ -90,9 +90,7 @@ def test_question_lead_accepts_both_spellings_and_stores_camel_case() -> None:
     from_api = ChatMessageMetadata.model_validate({"question_lead": "Please confirm."})
     assert from_ai.question_lead == "Please confirm."
     assert from_ai == from_api
-    assert clamp_metadata(from_ai).model_dump(by_alias=True, exclude_none=True) == {
-        "questionLead": "Please confirm."
-    }
+    assert clamp_metadata(from_ai).model_dump(by_alias=True, exclude_none=True) == {"questionLead": "Please confirm."}
 
 
 def test_metadata_column_writes_sql_null_not_json_null() -> None:

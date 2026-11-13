@@ -32,9 +32,7 @@ class ChatRepository:
     # --- reads -------------------------------------------------------------
 
     def _owned(self, session_id: uuid.UUID, account_id: uuid.UUID) -> Select[tuple[ChatSession]]:
-        return select(ChatSession).where(
-            ChatSession.id == session_id, ChatSession.account_id == account_id
-        )
+        return select(ChatSession).where(ChatSession.id == session_id, ChatSession.account_id == account_id)
 
     async def find_owned_session_with_messages(
         self, session_id: uuid.UUID, account_id: uuid.UUID
@@ -45,9 +43,7 @@ class ChatRepository:
             session.messages.sort(key=lambda m: m.created_at)
         return session
 
-    async def find_user_sessions(
-        self, account_id: uuid.UUID
-    ) -> list[tuple[ChatSession, int, str | None]]:
+    async def find_user_sessions(self, account_id: uuid.UUID) -> list[tuple[ChatSession, int, str | None]]:
         """Session list rows: the session, its message count and its newest message."""
         count_sq = (
             select(func.count(ChatMessage.id))
@@ -106,15 +102,11 @@ class ChatRepository:
         return (await self._db.execute(stmt)).scalar_one_or_none()
 
     async def find_last_active_session_id(self, account_id: uuid.UUID) -> uuid.UUID | None:
-        stmt = select(LastActiveSession.session_id).where(
-            LastActiveSession.account_id == account_id
-        )
+        stmt = select(LastActiveSession.session_id).where(LastActiveSession.account_id == account_id)
         return (await self._db.execute(stmt)).scalar_one_or_none()
 
     async def get_session_name(self, session_id: uuid.UUID, account_id: uuid.UUID) -> str | None:
-        stmt = select(ChatSession.name).where(
-            ChatSession.id == session_id, ChatSession.account_id == account_id
-        )
+        stmt = select(ChatSession.name).where(ChatSession.id == session_id, ChatSession.account_id == account_id)
         return (await self._db.execute(stmt)).scalar_one_or_none()
 
     async def find_session_name_and_message_count(
@@ -137,27 +129,18 @@ class ChatRepository:
         return int((await self._db.execute(stmt)).scalar_one())
 
     async def find_messages(self, session_id: uuid.UUID) -> list[ChatMessage]:
-        stmt = (
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at)
-        )
+        stmt = select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at)
         return list((await self._db.execute(stmt)).scalars().all())
 
     async def find_first_messages(self, session_id: uuid.UUID, take: int) -> list[ChatMessage]:
         stmt = (
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at)
-            .limit(take)
+            select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at).limit(take)
         )
         return list((await self._db.execute(stmt)).scalars().all())
 
     # --- writes ------------------------------------------------------------
 
-    async def create_session(
-        self, account_id: uuid.UUID, session_id: uuid.UUID | None = None
-    ) -> ChatSession:
+    async def create_session(self, account_id: uuid.UUID, session_id: uuid.UUID | None = None) -> ChatSession:
         """`session_id` lets the client pick the id up front, so it knows the chat even
         if it stops waiting for the first reply. A duplicate id raises IntegrityError,
         which the router turns into 409."""
@@ -170,14 +153,10 @@ class ChatRepository:
         return session
 
     async def delete_owned_session(self, session_id: uuid.UUID, account_id: uuid.UUID) -> int:
-        stmt = delete(ChatSession).where(
-            ChatSession.id == session_id, ChatSession.account_id == account_id
-        )
+        stmt = delete(ChatSession).where(ChatSession.id == session_id, ChatSession.account_id == account_id)
         return int((await self._db.execute(stmt)).rowcount)
 
-    async def rename_owned_session(
-        self, session_id: uuid.UUID, account_id: uuid.UUID, name: str
-    ) -> int:
+    async def rename_owned_session(self, session_id: uuid.UUID, account_id: uuid.UUID, name: str) -> int:
         stmt = (
             update(ChatSession)
             .where(ChatSession.id == session_id, ChatSession.account_id == account_id)
@@ -185,9 +164,7 @@ class ChatRepository:
         )
         return int((await self._db.execute(stmt)).rowcount)
 
-    async def set_owned_session_pinned(
-        self, session_id: uuid.UUID, account_id: uuid.UUID, is_pinned: bool
-    ) -> int:
+    async def set_owned_session_pinned(self, session_id: uuid.UUID, account_id: uuid.UUID, is_pinned: bool) -> int:
         stmt = (
             update(ChatSession)
             .where(ChatSession.id == session_id, ChatSession.account_id == account_id)
@@ -195,9 +172,7 @@ class ChatRepository:
         )
         return int((await self._db.execute(stmt)).rowcount)
 
-    async def rename_if_still_default(
-        self, session_id: uuid.UUID, account_id: uuid.UUID, name: str
-    ) -> int:
+    async def rename_if_still_default(self, session_id: uuid.UUID, account_id: uuid.UUID, name: str) -> int:
         """Auto-naming never overwrites a title the user chose."""
         stmt = (
             update(ChatSession)
@@ -247,12 +222,14 @@ class ChatRepository:
         sender: ChatSender,
         content: str,
         metadata: ChatMessageMetadata | None = None,
+        agent_items: dict[str, object] | None = None,
     ) -> ChatMessage:
         message = ChatMessage(
             session_id=session_id,
             sender=sender.value,
             content=content,
             message_metadata=_stored_metadata(metadata),
+            agent_items=agent_items,
         )
         self._db.add(message)
         await self._db.flush()
@@ -260,9 +237,7 @@ class ChatRepository:
         return message
 
     async def delete_message(self, message_id: uuid.UUID, session_id: uuid.UUID) -> int:
-        stmt = delete(ChatMessage).where(
-            ChatMessage.id == message_id, ChatMessage.session_id == session_id
-        )
+        stmt = delete(ChatMessage).where(ChatMessage.id == message_id, ChatMessage.session_id == session_id)
         return int((await self._db.execute(stmt)).rowcount)
 
     async def rewrite_from_message(
@@ -284,9 +259,7 @@ class ChatRepository:
         """
         edited = (
             await self._db.execute(
-                select(ChatMessage).where(
-                    ChatMessage.id == message_id, ChatMessage.session_id == session_id
-                )
+                select(ChatMessage).where(ChatMessage.id == message_id, ChatMessage.session_id == session_id)
             )
         ).scalar_one_or_none()
         if edited is None:

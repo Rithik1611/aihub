@@ -30,8 +30,7 @@ def _clamp_task(task: ChatTask) -> ChatTask:
         amount=_clamp_text(task.amount),
         status=task.status,
         details=[
-            TaskDetail(label=_clamp_text(d.label), meta=_clamp_text(d.meta))
-            for d in task.details[:MAX_TASK_DETAILS]
+            TaskDetail(label=_clamp_text(d.label), meta=_clamp_text(d.meta)) for d in task.details[:MAX_TASK_DETAILS]
         ],
     )
 
@@ -41,6 +40,7 @@ def _clamp_question(question: ChatQuestion) -> ChatQuestion:
         q=_clamp_text(question.q),
         type=question.type,
         options=[_clamp_text(o) for o in question.options[:MAX_OPTIONS]],
+        descriptions=[_clamp_text(d) for d in question.descriptions[:MAX_OPTIONS]],
     )
 
 
@@ -55,29 +55,19 @@ def _state_fits(state: dict[str, object]) -> bool:
 def clamp_metadata(metadata: ChatMessageMetadata) -> ChatMessageMetadata:
     """Return a copy with every field bounded. Oversized state is dropped, not truncated."""
     return ChatMessageMetadata(
-        state=(
-            metadata.state if metadata.state is not None and _state_fits(metadata.state) else None
-        ),
+        state=(metadata.state if metadata.state is not None and _state_fits(metadata.state) else None),
         suggestions=(
             [_clamp_text(s) for s in metadata.suggestions[:MAX_SUGGESTIONS]]
             if metadata.suggestions is not None
             else None
         ),
         attachment=metadata.attachment,
-        tasks=(
-            [_clamp_task(t) for t in metadata.tasks[:MAX_TASKS]]
-            if metadata.tasks is not None
-            else None
-        ),
+        tasks=([_clamp_task(t) for t in metadata.tasks[:MAX_TASKS]] if metadata.tasks is not None else None),
         questions=(
-            [_clamp_question(q) for q in metadata.questions[:MAX_QUESTIONS]]
-            if metadata.questions is not None
-            else None
+            [_clamp_question(q) for q in metadata.questions[:MAX_QUESTIONS]] if metadata.questions is not None else None
         ),
         question_lead=(
-            _clamp_text(metadata.question_lead, MAX_QUESTION_LEAD)
-            if metadata.question_lead is not None
-            else None
+            _clamp_text(metadata.question_lead, MAX_QUESTION_LEAD) if metadata.question_lead is not None else None
         ),
         stopped=metadata.stopped if metadata.stopped else None,
         complete=metadata.complete if metadata.complete else None,

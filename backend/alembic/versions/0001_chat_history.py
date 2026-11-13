@@ -32,9 +32,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("account_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column(
-            "name", sa.String(length=100), server_default="New Session", nullable=False
-        ),
+        sa.Column("name", sa.String(length=100), server_default="New Session", nullable=False),
         sa.Column("is_pinned", sa.Boolean(), server_default=sa.text("false"), nullable=False),
         sa.Column(
             "suggestions",
@@ -69,9 +67,7 @@ def upgrade() -> None:
         "chat_session",
         ["account_id", "is_pinned", "updated_at"],
     )
-    op.create_index(
-        "ix_chat_session_account_started", "chat_session", ["account_id", "started_at"]
-    )
+    op.create_index("ix_chat_session_account_started", "chat_session", ["account_id", "started_at"])
 
     op.create_table(
         "chat_message",
@@ -95,9 +91,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_chat_message_session", "chat_message", ["session_id"])
-    op.create_index(
-        "ix_chat_message_session_created", "chat_message", ["session_id", "created_at"]
-    )
+    op.create_index("ix_chat_message_session_created", "chat_message", ["session_id", "created_at"])
 
     op.create_table(
         "chat_last_active_session",

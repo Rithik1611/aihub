@@ -1,0 +1,66 @@
+# uv workspace root (docs/adr/0010): this project is the agent core `ai/`; `backend/` is a member with its
+# own pyproject.toml. One uv.lock and one .venv for both, at the repo root.
+[project]
+name = "aihub-ai"
+version = "0.1.0"
+description = "aihub agent core (ai/): model loop, tools, write harness, app packs"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic-settings>=2.7.1",
+    "aiohttp>=3.9",
+    "jsonschema>=4.20",
+    "rank-bm25>=0.2.2",
+    "psycopg[binary]>=3.1",
+    "openpyxl>=3.1",
+    "openai>=3.49.0",
+    "ddgs>=9.16.1",
+    "langchain-core>=1.8.0",
+    "langchain-openai>=1.7.4",
+    "langsmith>=0.14.17",
+    "truststore>=0.10.5",
+    "pypdf>=7.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "mypy==1.14.1",
+    "pyright>=1.1.414",
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.2",
+    "ruff>=0.17.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ai"]
+
+[tool.uv.workspace]
+members = ["backend"]
+
+[tool.pytest.ini_options]
+# ai.* from the repo root, app.* from backend/ (the backend keeps its own import paths)
+pythonpath = [".", "backend"]
+testpaths = ["tests", "backend/tests"]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+
+[tool.pyright]
+include = ["ai", "tests"]
+exclude = ["ai/apps/cablecore/sandbox", "**/__pycache__"]  # sandbox/cc.py runs inside the container
+# loop.py is not edited (rule: the agent loop stays as ported). Its only findings are OpenAI SDK TypedDict
+# params (input/tools/reasoning) given plain dicts, which the API accepts; run_turn validates its output.
+ignore = ["ai/loop.py"]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+# the typed contract and core: strict
+strict = ["ai/__init__.py", "ai/context.py", "ai/settings.py", "ai/tools.py", "ai/langchain.py", "ai/ask_user.py", "ai/http.py"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

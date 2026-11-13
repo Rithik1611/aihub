@@ -1,0 +1,1172 @@
+[
+ {
+  "id": "E01",
+  "turns": [
+   "Create an enquiry for customer Cable_World: 2 km of 3 core 95 sqmm copper XLPE SWA PVC 0.6/1 kV to IEC 60502-1, needed by end of next month."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E02",
+  "turns": [
+   "Got this email from a customer, make an enquiry out of it:\n\nFrom: procurement@cableworld.example\nSubject: RFQ - LV power cables\nHi team, please quote the following for our substation project:\n1) 4C x 16 sqmm Cu/XLPE/PVC 0.6/1kV, IEC 60502-1 - 1500 m\n2) 4C x 35 sqmm Cu/XLPE/SWA/PVC 0.6/1kV - 800 m\n3) 1C x 240 sqmm Al/XLPE/PVC 0.6/1kV - 3000 m\nDelivery in 6 weeks. Regards, Priya"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E03",
+  "turns": [
+   "Pull the cable lines and specs out of the attached RFQ."
+  ],
+  "page": "/enquiry",
+  "approve": false,
+  "file": "customer_rfq_demo.pdf"
+ },
+ {
+  "id": "E04",
+  "turns": [
+   "What does this customer spec actually ask for? Voltage, standards, construction, everything."
+  ],
+  "page": "/enquiry",
+  "approve": false,
+  "file": "customer_spec.docx"
+ },
+ {
+  "id": "E05",
+  "turns": [
+   "Turn the attached cable list into enquiry lines I can load: description, quantity, unit."
+  ],
+  "page": "/enquiry",
+  "approve": false,
+  "file": "customer_cable_list_MESSY.xlsx"
+ },
+ {
+  "id": "E06",
+  "turns": [
+   "A customer wrote in as 'Cable World Pvt Ltd'. Is that one of our existing customers?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E07",
+  "turns": [
+   "Do we already have a design for 3C 95 sqmm Cu XLPE SWA PVC 0.6/1 kV?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "E08",
+  "turns": [
+   "Customer wants 3C 120 sqmm Cu XLPE armoured 0.6/1 kV. Nothing exact? Show me the closest designs we have."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "E09",
+  "turns": [
+   "Can we make a 1C 1000 sqmm copper XLPE 18/30 kV cable with what's in DesignCenter? What would block it?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "E10",
+  "turns": [
+   "Customer needs LV armoured power cables for an Indian utility. Which standards should we design to?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E11",
+  "turns": [
+   "Check ENQ-0214 - what information is missing from the lines before engineering can start?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E12",
+  "turns": [
+   "Draft the clarification questions I should send the customer for ENQ-0214."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E13",
+  "turns": [
+   "Anything contradictory in this spec?"
+  ],
+  "page": "/enquiry",
+  "approve": false,
+  "file": "customer_spec_MESSY.pdf"
+ },
+ {
+  "id": "E14",
+  "turns": [
+   "The customer asked for 3C 400 sqmm copper armoured LV. That's heavy - what alternatives could we offer?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E15",
+  "turns": [
+   "Create draft designs for the lines on ENQ-0214 that don't have a design yet."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E16",
+  "turns": [
+   "For a 3C 185 sqmm 0.6/1 kV armoured line, give me 3 design options from what we have and how they differ."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E17",
+  "turns": [
+   "Do we have the materials for ENG-MV-01359 in stock?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "E18",
+  "turns": [
+   "Can our plant actually produce ENG-MV-22652? Check it against the machines."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "E19",
+  "turns": [
+   "Rough numbers for a 3C 240 sqmm Al XLPE 11 kV cable: OD, weight, current rating."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E20",
+  "turns": [
+   "How ready is ENQ-0216 for engineering review? Give it a score and tell me why."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E21",
+  "turns": [
+   "Did the customer change anything between the versions of ENQ-0216?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E22",
+  "turns": [
+   "Write a technical reply to the customer explaining why we offer XLPE instead of PVC insulation for their 11 kV lines."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E23",
+  "turns": [
+   "Which open tenders do we have, and what cable lines do they ask for?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E24",
+  "turns": [
+   "Which of our open enquiries should we work on first?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E25",
+  "turns": [
+   "Get ENQ-0214 ready to hand over for quotation - what goes across and what's still missing?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E26",
+  "turns": [
+   "Un client nous demande: 'Câble 3x95 mm² cuivre isolé PRC armé, 0,6/1 kV, NF C 32-321, 2 km'. Qu'est-ce qu'il veut exactement et avons-nous un design?"
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E27",
+  "turns": [
+   "Summarize what's happened on ENQ-0216: comments, changes and what's left to do."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E28",
+  "turns": [
+   "Make a compliance matrix for ENQ-0214: what the customer asked vs what our assigned designs give."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E29",
+  "turns": [
+   "Export a summary of ENQ-0214 to Excel."
+  ],
+  "page": "/enquiry",
+  "approve": false
+ },
+ {
+  "id": "E30",
+  "turns": [
+   "This list has a lot of lines. Match each one to an existing design where we can."
+  ],
+  "page": "/enquiry",
+  "approve": false,
+  "file": "customer_cable_list_MESSY.xlsx"
+ },
+ {
+  "id": "D01",
+  "turns": [
+   "Create a new design: 4C 25 sqmm copper, XLPE, PVC sheath, unarmoured, 0.6/1 kV to IEC 60502-1."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D02",
+  "turns": [
+   "Make a design from the attached spec."
+  ],
+  "page": "/design",
+  "approve": false,
+  "file": "customer_spec.docx"
+ },
+ {
+  "id": "D03",
+  "turns": [
+   "Find our closest 1C 300 sqmm Cu XLPE armoured 0.6/1 kV design and copy it as a new design."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D04",
+  "turns": [
+   "I want to design a 3C 70 sqmm MV cable. Walk me through what I need to decide, step by step."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D05",
+  "turns": [
+   "What layers should a 3C 150 sqmm 11 kV armoured cable have, conductor to sheath?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D06",
+  "turns": [
+   "What sheath material should I use for a cable going into a tunnel where fire is a concern?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D07",
+  "turns": [
+   "What are the diameter over insulation, overall diameter and weight of ENG-MV-01359, and how are they calculated?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D08",
+  "turns": [
+   "Which formula does ENG-MV-22652 use for the insulation thickness, and is it the right one for its class?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D09",
+  "turns": [
+   "Show me the BOM of ENG-MV-01359."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D10",
+  "turns": [
+   "What's the process routing for ENG-MV-22652?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D11",
+  "turns": [
+   "Which attributes are empty on ENG-MV-22652 that should have a value?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D12",
+  "turns": [
+   "I'm starting a new range of 0.6/1 kV armoured cables. Which existing design should I use as the template?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D13",
+  "turns": [
+   "Create the 16, 25 and 35 sqmm sizes from LV-7035."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D14",
+  "turns": [
+   "From ENG-MV-01359, make the aluminium version of the same cable."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D15",
+  "turns": [
+   "Read this and tell me which design attributes it gives."
+  ],
+  "page": "/design",
+  "approve": false,
+  "file": "conductor_resistance_SCREENSHOT.png"
+ },
+ {
+  "id": "D16",
+  "turns": [
+   "Explain how ENG-MV-22652 is built and why each layer is there."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D17",
+  "turns": [
+   "What does IEC 60502-2 say about the minimum insulation thickness for XLPE at 18/30 kV?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D18",
+  "turns": [
+   "Which clauses of IEC 60502-1 cover armour wire dimensions?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D19",
+  "turns": [
+   "Check ENG-MV-22652 against its standard. Anything out of spec?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D20",
+  "turns": [
+   "Are the insulation and sheath thicknesses on ENG-MV-01359 OK for its standard?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D21",
+  "turns": [
+   "Check the conductor on ENG-MV-01359: class, dimensions and resistance against IEC 60228."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D22",
+  "turns": [
+   "Any material compatibility problems in the construction of ENG-INS-0284?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D23",
+  "turns": [
+   "Does ENG-MV-22652 meet the electrical requirements for an 18/30 kV cable?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D24",
+  "turns": [
+   "Check the mechanical side of ENG-MV-01359: bending radius and pulling tension."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D25",
+  "turns": [
+   "What's different between IEC 60502-1 and BS 5467 for armoured LV cables?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D26",
+  "turns": [
+   "Give me a gap analysis for ENG-MV-22652: which parameters are missing or don't comply?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D27",
+  "turns": [
+   "ENG-MV-22652 has problems against its standard. What should I change to fix them?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D28",
+  "turns": [
+   "Turn the attached IEC 60502-2 insulation table into a rule we could use in DesignCenter."
+  ],
+  "page": "/design",
+  "approve": false,
+  "file": "IEC_60502-2_XLPE_insulation_thickness.csv"
+ },
+ {
+  "id": "D29",
+  "turns": [
+   "Convert the attached standard table into structured data I can import as a lookup table."
+  ],
+  "page": "/design",
+  "approve": false,
+  "file": "IRAM_63004_ETIX_MT_dimensions.csv"
+ },
+ {
+  "id": "D30",
+  "turns": [
+   "If IEC 60502-2 increased the 18/30 kV XLPE insulation thickness, which of our designs would be affected?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D31",
+  "turns": [
+   "Make a compliance report for ENG-MV-01359 that shows the evidence for each check."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D32",
+  "turns": [
+   "Which engineering calculations can I run for ENG-MV-22652, and run the most relevant one."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D33",
+  "turns": [
+   "What's the current rating of ENG-MV-01359 buried at 90 C?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D34",
+  "turns": [
+   "Voltage drop on 500 m of ENG-MV-01359 at 300 A, power factor 0.85?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D35",
+  "turns": [
+   "DC and AC resistance of the conductor in ENG-MV-01359 at 90 C?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D36",
+  "turns": [
+   "What short-circuit current can the conductor and screen of ENG-MV-22652 take for 1 second?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D37",
+  "turns": [
+   "How big are the screen losses on ENG-MV-22652 if both ends are bonded?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D38",
+  "turns": [
+   "Calculate the dielectric losses of ENG-MV-22652."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D39",
+  "turns": [
+   "Induced voltage on the screen of ENG-MV-22652, single-point bonded, 500 m run at 400 A?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D40",
+  "turns": [
+   "For ENG-MV-22652, should we bond at one end, both ends or cross-bond for a 1.5 km circuit?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D41",
+  "turns": [
+   "Break down the thermal resistances (T1-T4) for ENG-MV-01359 buried at 1 m."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D42",
+  "turns": [
+   "What's the emergency rating of ENG-MV-01359 for a 6 hour overload?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D43",
+  "turns": [
+   "Compare the rating of ENG-MV-01359 in ground, in duct and in air."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D44",
+  "turns": [
+   "What cable size do I need for 400 A at 11 kV, buried, copper XLPE?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D45",
+  "turns": [
+   "Explain how the current rating of ENG-MV-01359 was calculated and what assumptions went in."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D46",
+  "turns": [
+   "How does the rating of ENG-MV-01359 change if soil thermal resistivity goes from 1.0 to 2.5 K.m/W?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D47",
+  "turns": [
+   "Copper or aluminium for ENG-MV-01359? Compare the two technically."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D48",
+  "turns": [
+   "Compare XLPE, EPR and PVC insulation for ENG-MV-01359."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D49",
+  "turns": [
+   "Which sheath material is better for ENG-MV-22652: PVC, PE or LSZH?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D50",
+  "turns": [
+   "Is the copper screen on ENG-MV-22652 bigger than it needs to be?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D51",
+  "turns": [
+   "What armour alternatives do we have for ENG-MV-01359, and what changes with each?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D52",
+  "turns": [
+   "How can I make ENG-MV-01359 lighter without breaking the standard?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D53",
+  "turns": [
+   "How can I reduce the overall diameter of ENG-MV-22652?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D54",
+  "turns": [
+   "Where does ENG-MV-01359 use the most material, and where could we cut it?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D55",
+  "turns": [
+   "Is there a cheaper design that does the same job as ENG-MV-01359?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D56",
+  "turns": [
+   "Compare the manufacturing cost of the process steps of ENG-MV-01359."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D57",
+  "turns": [
+   "For a 3C 240 sqmm 11 kV cable, which of our designs gives the best balance of cost, diameter and weight?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D58",
+  "turns": [
+   "Rank our 18/30 kV designs by weight per km."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D59",
+  "turns": [
+   "Compare the carbon footprint of ENG-INS-0284 with similar designs."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D60",
+  "turns": [
+   "Explain the trade-offs between the copper and aluminium versions of a 3C 240 sqmm 11 kV cable."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D61",
+  "turns": [
+   "Write a formula for armour wire diameter: 1.6 mm up to 25 mm diameter under armour, 2.0 mm up to 35 mm, 2.5 mm above."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D62",
+  "turns": [
+   "Explain the nominal insulation thickness formula used by ENG-MV-22652."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D63",
+  "turns": [
+   "Change the sheath thickness formula for Medium Voltage so the minimum is 2.0 mm."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D64",
+  "turns": [
+   "Are there errors or broken references in the formulas used by ENG-MV-22652?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D65",
+  "turns": [
+   "ENG-MV-22652 has an attribute with no value from its formula. Find out why and propose a fix."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D66",
+  "turns": [
+   "Can the nominal insulation thickness formula for Medium Voltage be simplified without changing its results?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D67",
+  "turns": [
+   "Do we already have a formula that calculates conductor diameter from CSA I can reuse?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D68",
+  "turns": [
+   "How would I convert a CableBuilder formula like IF(CSA<=50, 1.0, 1.2) into DesignCenter's formula syntax?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D69",
+  "turns": [
+   "If I change the nominal insulation thickness formula for Medium Voltage, which designs and attributes are affected?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D70",
+  "turns": [
+   "Give me test cases to check the nominal insulation thickness formula for Medium Voltage, with expected values."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D71",
+  "turns": [
+   "Compare ENG-MV-01359 and ENG-MV-22652: construction, key values and cost."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D72",
+  "turns": [
+   "The customer now wants ENG-MV-22652 with a 35 sqmm copper screen instead. Update the draft for that."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D73",
+  "turns": [
+   "If I change the conductor of ENG-MV-01359 to aluminium, what happens to the BOM, routing, calculations and cost?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D74",
+  "turns": [
+   "Do we have duplicate or near-duplicate designs in the RM_Atlas catalogue?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D75",
+  "turns": [
+   "Make a technical datasheet for ENG-MV-01359."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D76",
+  "turns": [
+   "Give me an engineering summary of ENG-MV-22652."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D77",
+  "turns": [
+   "Here's a drawing / screenshot with conductor data. Does it match LV-7035?"
+  ],
+  "page": "/design",
+  "approve": false,
+  "file": "conductor_resistance_SCREENSHOT.png"
+ },
+ {
+  "id": "D78",
+  "turns": [
+   "Check the BOM of ENG-MV-01359: are the quantities and units sensible?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D79",
+  "turns": [
+   "Can the routing of ENG-MV-22652 run on our machines? Any steps that exceed capability?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D80",
+  "turns": [
+   "Which processes and machines would you suggest for making ENG-MV-01359?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D81",
+  "turns": [
+   "Is ENG-MV-22652 ready to approve? Status, checks and risks."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D82",
+  "turns": [
+   "Write a change note explaining what changed on ENG-MV-22652 recently."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D83",
+  "turns": [
+   "Have we designed any 33 kV aluminium cables before? What did we do?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D84",
+  "turns": [
+   "What do our engineers change by hand most often on designs?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "D85",
+  "turns": [
+   "Put together the handover package for ENG-MV-01359: design, BOM, routing and release info."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C01",
+  "turns": [
+   "What does ENG-MV-01359 cost and where does the cost come from?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C02",
+  "turns": [
+   "Break down the raw material cost of ENG-MV-01359 by layer."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C03",
+  "turns": [
+   "How much does ENG-MV-01359 cost go up if copper rises 15%?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C04",
+  "turns": [
+   "Suggest a cheaper construction for ENG-MV-01359 that still meets the standard."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C05",
+  "turns": [
+   "Compare the cost of ENG-MV-01359 and ENG-MV-22652."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C06",
+  "turns": [
+   "What are the labour, machine, energy, scrap and overhead costs of ENG-MV-01359?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C07",
+  "turns": [
+   "Would ENG-MV-01359 be cheaper to make on a different machine?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C08",
+  "turns": [
+   "How much scrap cost is in ENG-MV-01359, and where?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C09",
+  "turns": [
+   "Which input moves the cost of ENG-MV-01359 most: material rates, line speed or scrap?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C10",
+  "turns": [
+   "Compare standard, estimated and actual cost for ENG-MV-01359."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C11",
+  "turns": [
+   "We need ENG-MV-01359 to cost 10% less. What would get us there?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C12",
+  "turns": [
+   "Cost per metre and per km of ENG-MV-01359?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C13",
+  "turns": [
+   "What margin do we make on ENG-MV-01359?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C14",
+  "turns": [
+   "What if we order 50 km of ENG-MV-01359 and aluminium goes up 8%? What's the cost?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C15",
+  "turns": [
+   "Rank the savings opportunities on ENG-MV-01359 from biggest to smallest."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C16",
+  "turns": [
+   "Which BOM items of ENG-MV-01359 are the most expensive?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C17",
+  "turns": [
+   "Is there a cheaper routing for ENG-MV-01359?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C18",
+  "turns": [
+   "How has the cost of ENG-MV-01359 changed across costing versions?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C19",
+  "turns": [
+   "Why does ENG-MV-01359 cost more than ENG-MV-22652 (or less)?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "C20",
+  "turns": [
+   "Make a cost comparison report of ENG-MV-01359 and ENG-MV-22652 in Excel."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A01",
+  "turns": [
+   "Help me design a 1C 1000 sqmm copper 132 kV XLPE cable: insulation, screen and sheath."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A02",
+  "turns": [
+   "What screen size and bonding should a 3 km, 1C 630 sqmm 66 kV circuit use?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A03",
+  "turns": [
+   "How should a 48-fibre loose-tube optical cable be built?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A04",
+  "turns": [
+   "What attenuation should I expect for a 25 km G.652D single-mode link at 1310 and 1550 nm?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A05",
+  "turns": [
+   "What's the max pulling tension and minimum bending radius for ENG-MV-01359?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A06",
+  "turns": [
+   "How much does ENG-MV-22652 expand thermally from 20 to 90 C over 500 m, and what thermal force does that create?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A07",
+  "turns": [
+   "Design a 10 pair overall-screened instrumentation cable to BS EN 50288-7 and give the colour code."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A08",
+  "turns": [
+   "What ACSR conductor should I use for a 33 kV overhead line carrying 400 A?"
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A09",
+  "turns": [
+   "What happens to ENG-MV-01359's diameter, weight and rating if I go to 300 sqmm? Recalculate it."
+  ],
+  "page": "/design",
+  "approve": false
+ },
+ {
+  "id": "A10",
+  "turns": [
+   "Set up a COMSOL thermal simulation for ENG-MV-01359 buried in trefoil: geometry, materials and boundaries."
+  ],
+  "page": "/design",
+  "approve": false
+ }
+]

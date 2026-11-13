@@ -5,22 +5,27 @@ aihub serves DEFAULT-mode chat only; SUPPORT and FORMULA stay in cableCORE_BE
 existing frontend can be pointed here unchanged (docs/adr/0005).
 """
 
+import json
 import logging
 import uuid
-from typing import Annotated
+from collections.abc import AsyncIterator
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.ai_client import AiClient, AiServiceUnavailable, build_history, stub_response
+from app.chat import agent
 from app.chat.repository import ChatRepository
 from app.chat.schemas import (
+    MAX_MESSAGE_LENGTH,
     ApiResponse,
     ChatMessageMetadata,
     ChatMode,
     ChatReply,
     ChatSender,
+    ChatTask,
     LastActive,
     PinSession,
     SendMessage,
@@ -31,10 +36,11 @@ from app.chat.schemas import (
     SessionSummary,
     UpdateSessionName,
 )
-from app.core.auth import extract_token
+from app.core.auth import Caller, extract_token
 from app.core.config import Settings, get_settings
 from app.core.db import get_session
 from app.core.rate_limit import ThrottledCaller
+from app.sandbox.router import Tickets
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +48,9 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 SessionId = Annotated[uuid.UUID, Path(description="Chat session id")]
 
-# The transcript tail sent to the engine. The engine keeps its own working memory,
-# so only the newest turns matter.
-HISTORY_WINDOW = 20
+MAX_UPLOAD_BYTES = 20_000_000
 
-_SESSION_NOT_FOUND = HTTPException(
-    status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-)
+_SESSION_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
 
 def get_repository(session: Annotated[AsyncSession, Depends(get_session)]) -> ChatRepository:
@@ -68,92 +70,169 @@ def _require_default(mode: ChatMode) -> None:
         )
 
 
+async def _open_session(
+    repo: ChatRepository, account_id: uuid.UUID, session_id: uuid.UUID | None, new_session_id: uuid.UUID | None
+) -> tuple[uuid.UUID, bool]:
+    """The turn's session: the caller's existing one, or a new one (with the id the client chose)."""
+    if session_id is not None:
+        if not await repo.is_session_owned(session_id, account_id):
+            raise _SESSION_NOT_FOUND
+        return session_id, False
+    try:
+        created = (await repo.create_session(account_id, new_session_id)).id
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This chat already exists. Reopen it to continue.",
+        ) from exc
+    await repo.commit()
+    return created, True
+
+
+async def _turn_events(
+    request: Request,
+    caller: Caller,
+    repo: ChatRepository,
+    settings: Settings,
+    message: str,
+    session_id: uuid.UUID | None,
+    new_session_id: uuid.UUID | None,
+    page: str,
+    file: UploadFile | None,
+) -> AsyncIterator[dict[str, Any]]:
+    """One request of a chat turn on the agent (docs/adr/0009), as the frontend's stream events."""
+    account_id = caller.account_id
+    token = extract_token(request, settings)
+    attachment = None
+    if file is not None and file.filename:
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="The file is too large.")
+        attachment = (file.filename, content, file.content_type or "application/octet-stream")
+    session, new_session = await _open_session(repo, account_id, session_id, new_session_id)
+    try:
+        events = agent.respond(
+            account_id=account_id,
+            username=caller.username or str(caller.account_id),
+            token=token,
+            session_id=session,
+            new_session=new_session,
+            message=message,
+            page=page,
+            attachment=attachment,
+            tickets=Tickets(token),
+            stub=settings.ai_stub,
+        )
+        first = await anext(events)
+    except agent.TurnBusy as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="A reply is still being written in this chat."
+        ) from exc
+    yield first
+    async for event in events:
+        yield event
+
+
+async def _final(events: AsyncIterator[dict[str, Any]]) -> ApiResponse[ChatReply]:
+    """The blocking form of a turn: everything up to `done`."""
+    async for event in events:
+        if event["type"] == "done":
+            return ApiResponse(
+                status_code=status.HTTP_200_OK,
+                message="Message processed successfully",
+                data=ChatReply.model_validate({k: v for k, v in event.items() if k != "type"}),
+            )
+        if event["type"] == "error":
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=event["message"])
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI service is currently unavailable.")
+
+
 @router.post("/send", response_model=ApiResponse[ChatReply])
 async def send_message(
-    body: SendMessage,
+    body: SendMessage, request: Request, caller: ThrottledCaller, repo: Repository, settings: Config
+) -> ApiResponse[ChatReply]:
+    """Store the user's message, run the turn on the agent, store the reply. When the agent needs an
+    approval or an answer, the reply carries it as `questions` and the next message answers it."""
+    _require_default(body.mode)
+    return await _final(
+        _turn_events(request, caller, repo, settings, body.message, body.session_id, body.new_session_id, "", None)
+    )
+
+
+@router.post("/send-with-file", response_model=ApiResponse[ChatReply])
+async def send_with_file(
     request: Request,
     caller: ThrottledCaller,
     repo: Repository,
     settings: Config,
+    message: Annotated[str, Form(max_length=MAX_MESSAGE_LENGTH)] = "",
+    session_id: Annotated[uuid.UUID | None, Form(alias="sessionId")] = None,
+    new_session_id: Annotated[uuid.UUID | None, Form(alias="newSessionId")] = None,
+    page: Annotated[str, Form(max_length=500)] = "",
+    file: Annotated[UploadFile | None, File()] = None,
 ) -> ApiResponse[ChatReply]:
-    """Store the user's message, ask the AI service, store the reply.
-
-    The human message is written before the AI is called, so a failed or slow turn
-    never loses what the user typed - the same order cableCORE uses.
-    """
-    _require_default(body.mode)
-    account_id = caller.account_id
-
-    if body.session_id is None:
-        try:
-            session_id = (await repo.create_session(account_id, body.new_session_id)).id
-        except IntegrityError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="This chat already exists. Reopen it to continue.",
-            ) from exc
-        recent: list[tuple[str, str]] = []
-    else:
-        history = await repo.find_owned_session_recent_messages(
-            body.session_id, account_id, HISTORY_WINDOW
+    return await _final(
+        _turn_events(
+            request,
+            caller,
+            repo,
+            settings,
+            message or "(see the attached file)",
+            session_id,
+            new_session_id,
+            page,
+            file,
         )
-        if history is None:
-            raise _SESSION_NOT_FOUND
-        session_id = body.session_id
-        recent = [(m.sender, m.content) for m in history]
-
-    await repo.set_last_active_session(account_id, session_id)
-    user_message = await repo.create_message(session_id, ChatSender.HUMAN, body.message)
-    user_index = await repo.count_messages(session_id) - 1
-    # Committed before the AI call: a turn that fails or times out must not take the
-    # user's message with it. cableCORE gets this from Prisma's per-query commit.
-    await repo.commit()
-
-    if settings.ai_stub:
-        answer = stub_response(body.message)
-    else:
-        ai = AiClient(settings.ai_base_url, extract_token(request, settings))
-        try:
-            answer = await ai.send(str(session_id), build_history(recent, body.message))
-        except AiServiceUnavailable as exc:
-            # The user's message stays stored, exactly as in cableCORE.
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AI service is currently unavailable. Please try again later.",
-            ) from exc
-
-    reply_text = answer.response or "Sorry, I could not generate a response."
-    metadata = ChatMessageMetadata(
-        state=answer.state,
-        suggestions=answer.suggestions,
-        tasks=answer.tasks or None,
-        questions=answer.questions or None,
-        question_lead=answer.question_lead if answer.questions else None,
-        complete=answer.complete or None,
-        stopped=answer.cancelled or None,
     )
-    ai_message = await repo.create_message(session_id, ChatSender.AI, reply_text, metadata)
-    await repo.set_session_suggestions(session_id, account_id, answer.suggestions)
 
+
+@router.post("/stream")
+async def stream_message(
+    request: Request,
+    caller: ThrottledCaller,
+    repo: Repository,
+    settings: Config,
+    message: Annotated[str, Form(max_length=MAX_MESSAGE_LENGTH)] = "",
+    session_id: Annotated[uuid.UUID | None, Form(alias="sessionId")] = None,
+    new_session_id: Annotated[uuid.UUID | None, Form(alias="newSessionId")] = None,
+    page: Annotated[str, Form(max_length=500)] = "",
+    file: Annotated[UploadFile | None, File()] = None,
+) -> StreamingResponse:
+    """The same turn as server-sent events: `session`, `steps` (task rows), `delta` / `note` (text as it is
+    written), then `done` (the stored reply, as /send returns it) or `error`."""
+    if not message and file is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="message or file is required")
+    events = _turn_events(
+        request, caller, repo, settings, message or "(see the attached file)", session_id, new_session_id, page, file
+    )
+    first = await anext(events)  # errors before the stream starts (auth, session, busy) stay HTTP errors
+    session = uuid.UUID(first["sessionId"])
+
+    async def body() -> AsyncIterator[str]:
+        finished = False
+        try:
+            yield f"data: {json.dumps(first)}\n\n"
+            async for event in events:
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+                finished = event["type"] in ("done", "error")
+        finally:
+            if not finished:  # the user stopped or left mid-reply
+                agent.cancel(session)
+
+    return StreamingResponse(body(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/progress/{session_id}", response_model=ApiResponse[dict[str, list[ChatTask]]])
+async def progress(
+    session_id: SessionId, caller: ThrottledCaller, repo: Repository
+) -> ApiResponse[dict[str, list[ChatTask]]]:
+    """Live task rows of the session's running turn, for clients on the blocking /send."""
+    if not await repo.is_session_owned(session_id, caller.account_id):
+        raise _SESSION_NOT_FOUND
     return ApiResponse(
         status_code=status.HTTP_200_OK,
-        message="Message processed successfully",
-        data=ChatReply(
-            session_id=session_id,
-            reply=reply_text,
-            session_name=await repo.get_session_name(session_id, account_id),
-            suggestions=answer.suggestions,
-            user_message_index=user_index,
-            ai_message_index=user_index + 1,
-            user_message_id=user_message.id,
-            ai_message_id=ai_message.id,
-            state=answer.state,
-            tasks=answer.tasks,
-            questions=answer.questions,
-            question_lead=answer.question_lead if answer.questions else None,
-            complete=answer.complete or None,
-            stopped=answer.cancelled or None,
-        ),
+        message="Progress retrieved successfully",
+        data={"tasks": agent.running_tasks(session_id)},
     )
 
 
@@ -217,16 +296,12 @@ async def get_session_messages(
 
 
 @router.delete("/sessions/{session_id}", response_model=ApiResponse[None])
-async def delete_session(
-    session_id: SessionId, caller: ThrottledCaller, repo: Repository
-) -> ApiResponse[None]:
+async def delete_session(session_id: SessionId, caller: ThrottledCaller, repo: Repository) -> ApiResponse[None]:
     account_id = caller.account_id
     if await repo.delete_owned_session(session_id, account_id) == 0:
         raise _SESSION_NOT_FOUND
     await repo.clear_last_active_session(account_id, session_id)
-    return ApiResponse(
-        status_code=status.HTTP_200_OK, message="Session deleted successfully", data=None
-    )
+    return ApiResponse(status_code=status.HTTP_200_OK, message="Session deleted successfully", data=None)
 
 
 @router.patch("/sessions/{session_id}/name", response_model=ApiResponse[SessionName])

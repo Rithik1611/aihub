@@ -30,17 +30,13 @@ def _create_engine() -> AsyncEngine:
         connect_args={
             # Server-side, so it survives a client that stops waiting: Postgres
             # aborts the statement instead of holding the connection open.
-            "server_settings": {
-                "statement_timeout": str(settings.db_statement_timeout_seconds * 1000)
-            }
+            "server_settings": {"statement_timeout": str(settings.db_statement_timeout_seconds * 1000)}
         },
     )
 
 
 engine: AsyncEngine = _create_engine()
-SessionFactory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    engine, expire_on_commit=False
-)
+SessionFactory: async_sessionmaker[AsyncSession] = async_sessionmaker(engine, expire_on_commit=False)
 
 
 async def dispose_engine() -> None:

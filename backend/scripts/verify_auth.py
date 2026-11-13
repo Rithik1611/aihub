@@ -69,9 +69,7 @@ def remember(response: httpx.Response) -> httpx.Response:
 async def cleanup(client: httpx.AsyncClient, token: str, report: Report) -> None:
     removed = 0
     for session_id in _created:
-        response = await client.delete(
-            f"{AIHUB}/api/chat/sessions/{session_id}", headers=bearer(token)
-        )
+        response = await client.delete(f"{AIHUB}/api/chat/sessions/{session_id}", headers=bearer(token))
         removed += 1 if response.status_code == 200 else 0
     report.record("cleanup", "sessions created by this run removed", len(_created), removed)
 
@@ -113,9 +111,7 @@ def body(message: str = "verification probe") -> dict[str, object]:
 
 async def sign_in(client: httpx.AsyncClient, user: str, password: str) -> str:
     """A real cableCORE access token, via the plain-password endpoint."""
-    response = await client.post(
-        f"{CABLECORE}/auth/token", json={"username": user, "password": password}
-    )
+    response = await client.post(f"{CABLECORE}/auth/token", json={"username": user, "password": password})
     response.raise_for_status()
     token: str = response.json()["data"]["accessToken"]
     return token
@@ -144,9 +140,7 @@ def forge(**overrides: object) -> str:
     for key, value in list(payload.items()):
         if value is None:
             del payload[key]
-    return jwt.encode(
-        payload, settings.jwt_secret.get_secret_value(), algorithm=settings.jwt_algorithm
-    )
+    return jwt.encode(payload, settings.jwt_secret.get_secret_value(), algorithm=settings.jwt_algorithm)
 
 
 async def check_authentication(client: httpx.AsyncClient, report: Report, token: str) -> None:
@@ -196,9 +190,7 @@ async def check_authentication(client: httpx.AsyncClient, report: Report, token:
     report.record(group, "signed with another secret", 401, response.status_code)
 
 
-async def check_licence(
-    client: httpx.AsyncClient, report: Report, unlicensed_token: str | None
-) -> None:
+async def check_licence(client: httpx.AsyncClient, report: Report, unlicensed_token: str | None) -> None:
     group = "ai licence"
     cases: list[tuple[str, str, int]] = [
         ("no activePlantId claim", forge(activePlantId=None), 403),
@@ -229,9 +221,7 @@ async def check_cross_site(client: httpx.AsyncClient, report: Report, token: str
     cookies = {"access_token": token}
 
     allowed = {"Origin": ALLOWED_ORIGIN, "Content-Type": "application/json"}
-    response = remember(
-        await client.post(f"{AIHUB}{SEND}", cookies=cookies, headers=allowed, json=body())
-    )
+    response = remember(await client.post(f"{AIHUB}{SEND}", cookies=cookies, headers=allowed, json=body()))
     report.record(group, "cookie POST from allowed origin", 200, response.status_code)
 
     refused: list[tuple[str, dict[str, str]]] = [
@@ -258,9 +248,7 @@ async def check_cross_site(client: httpx.AsyncClient, report: Report, token: str
         ("multipart body", {"Origin": ALLOWED_ORIGIN, "Content-Type": "multipart/form-data"}),
     ]
     for name, headers in refused:
-        response = await client.post(
-            f"{AIHUB}{SEND}", cookies=cookies, headers=headers, content=b'{"message":"x"}'
-        )
+        response = await client.post(f"{AIHUB}{SEND}", cookies=cookies, headers=headers, content=b'{"message":"x"}')
         report.record(group, name, 403, response.status_code)
 
     response = await client.get(f"{AIHUB}{SESSIONS}", cookies=cookies)
@@ -343,9 +331,7 @@ async def check_security_headers(client: httpx.AsyncClient, report: Report) -> N
 async def check_tenant_isolation(client: httpx.AsyncClient, report: Report, token: str) -> None:
     """One account must never reach another's conversation."""
     group = "isolation"
-    mine = remember(
-        await client.post(f"{AIHUB}{SEND}", headers=bearer(token), json=body("isolation probe"))
-    )
+    mine = remember(await client.post(f"{AIHUB}{SEND}", headers=bearer(token), json=body("isolation probe")))
     if mine.status_code != 200:
         report.skip(group, "setup: create a session", f"send returned {mine.status_code}")
         return
@@ -403,10 +389,18 @@ async def check_input_validation(client: httpx.AsyncClient, report: Report, toke
 
 
 async def check_token_freshness(
-    client: httpx.AsyncClient, report: Report, token: str, alt_plant: str | None
+    client: httpx.AsyncClient,
+    report: Report,
+    token: str,
+    alt_plant: str | None,
+    live_cablecore: bool = True,
 ) -> None:
     """The two gap fixes: a short lifetime, and claims reissued on a plant switch."""
     group = "claim freshness"
+    if not live_cablecore:
+        report.skip(group, "access token lifetime is 15 minutes", "needs cableCORE")
+        report.skip(group, "plant switch reissues the token", "needs cableCORE")
+        return
     claims = claims_of(token)
     lifetime = (int(str(claims["exp"])) - int(str(claims["iat"]))) // 60
     report.record(group, "access token lifetime is 15 minutes", 15, lifetime)
@@ -417,24 +411,18 @@ async def check_token_freshness(
 
     original = str(claims.get("activePlantId"))
     auth = bearer(token)
-    switched = await client.patch(
-        f"{CABLECORE}/account/change-active-plant/{alt_plant}", headers=auth
-    )
+    switched = await client.patch(f"{CABLECORE}/account/change-active-plant/{alt_plant}", headers=auth)
     report.record(group, "plant switch accepted", 200, switched.status_code)
 
     reissued = switched.cookies.get("access_token")
     report.record(group, "plant switch reissues the access token", True, reissued is not None)
     if reissued is not None:
         new_claims = claims_of(reissued)
-        report.record(
-            group, "reissued token names the new plant", alt_plant, new_claims.get("activePlantId")
-        )
+        report.record(group, "reissued token names the new plant", alt_plant, new_claims.get("activePlantId"))
         response = await client.get(f"{AIHUB}{SESSIONS}", headers=bearer(reissued))
         report.record(group, "aihub accepts the reissued token", 200, response.status_code)
 
-    restored = await client.patch(
-        f"{CABLECORE}/account/change-active-plant/{original}", headers=auth
-    )
+    restored = await client.patch(f"{CABLECORE}/account/change-active-plant/{original}", headers=auth)
     report.record(group, "original plant restored", 200, restored.status_code)
 
 
@@ -465,11 +453,7 @@ def render(report: Report) -> None:
             current = check.group
             print(f"\n{current.upper()}")
         mark = {Outcome.PASS: "ok  ", Outcome.FAIL: "FAIL", Outcome.SKIP: "skip"}[check.outcome]
-        detail = (
-            f"expected {check.expected}, got {check.actual}"
-            if check.outcome is Outcome.FAIL
-            else check.actual
-        )
+        detail = f"expected {check.expected}, got {check.actual}" if check.outcome is Outcome.FAIL else check.actual
         print(f"  [{mark}] {check.name:<{width}} {detail}")
 
     passed = sum(1 for c in report.checks if c.outcome is Outcome.PASS)
@@ -480,19 +464,21 @@ def render(report: Report) -> None:
 async def main() -> int:
     user = os.environ.get("VERIFY_USER")
     password = os.environ.get("VERIFY_PASSWORD")
-    if not user or not password:
-        print("VERIFY_USER and VERIFY_PASSWORD must be set", file=sys.stderr)
-        return 2
 
     report = Report()
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
-        token = await sign_in(client, user, password)
+        # Without cableCORE credentials the script still verifies aihub on its own,
+        # with a locally signed token; the checks that need cableCORE are skipped.
+        live_cablecore = bool(user and password)
+        token = await sign_in(client, user, password) if live_cablecore else forge()
+        if not live_cablecore:
+            print("VERIFY_USER/VERIFY_PASSWORD not set - running aihub-only checks")
 
         unlicensed_user = os.environ.get("VERIFY_UNLICENSED_USER")
         unlicensed_password = os.environ.get("VERIFY_UNLICENSED_PASSWORD")
         unlicensed = (
             await sign_in(client, unlicensed_user, unlicensed_password)
-            if unlicensed_user and unlicensed_password
+            if live_cablecore and unlicensed_user and unlicensed_password
             else None
         )
 
@@ -506,7 +492,13 @@ async def main() -> int:
             ("validation", check_input_validation(client, report, token)),
             (
                 "claim freshness",
-                check_token_freshness(client, report, token, os.environ.get("VERIFY_ALT_PLANT_ID")),
+                check_token_freshness(
+                    client,
+                    report,
+                    token,
+                    os.environ.get("VERIFY_ALT_PLANT_ID") if live_cablecore else None,
+                    live_cablecore,
+                ),
             ),
         ]
         for name, coroutine in groups:

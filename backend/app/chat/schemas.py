@@ -9,15 +9,13 @@ history can be migrated from cableCORE verbatim. See docs/adr/0005.
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Final, Generic, TypeVar
+from typing import Annotated, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 MAX_MESSAGE_LENGTH: Final = 4000
 MAX_SESSION_NAME_LENGTH: Final = 100
-
-T = TypeVar("T")
 
 
 class ChatSender(StrEnum):
@@ -72,7 +70,7 @@ class _Payload(_Camel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore")
 
 
-class ApiResponse(BaseModel, Generic[T]):
+class ApiResponse[T](BaseModel):
     """cableCORE's response envelope, reproduced so the frontend is drop-in."""
 
     status_code: int = Field(serialization_alias="statusCode")
@@ -101,6 +99,8 @@ class ChatQuestion(_Payload):
     q: str = ""
     type: QuestionType = QuestionType.RADIO
     options: list[str] = Field(default_factory=list)
+    # A short explanation under each option, same order (the frontend card shows it).
+    descriptions: list[str] = Field(default_factory=list)
 
 
 class ChatAttachment(_Payload):

@@ -75,9 +75,7 @@ async def test_accepts_cookie_token() -> None:
         ("refresh token", lambda: bearer(make_token(type="refresh"))),
         (
             "expired beyond leeway",
-            lambda: bearer(
-                make_token(exp=int((datetime.now(UTC) - timedelta(minutes=5)).timestamp()))
-            ),
+            lambda: bearer(make_token(exp=int((datetime.now(UTC) - timedelta(minutes=5)).timestamp()))),
         ),
         (
             "wrong secret",
@@ -191,9 +189,7 @@ def allowed_settings() -> Settings:
 
 
 async def test_cookie_write_from_allowed_origin_is_accepted() -> None:
-    assert (await get_caller(cookie_write(), allowed_settings())).account_id == uuid.UUID(
-        ACCOUNT_ID
-    )
+    assert (await get_caller(cookie_write(), allowed_settings())).account_id == uuid.UUID(ACCOUNT_ID)
 
 
 @pytest.mark.parametrize(
@@ -263,9 +259,7 @@ async def test_bearer_write_is_exempt() -> None:
     assert (await get_caller(request, allowed_settings())).account_id == uuid.UUID(ACCOUNT_ID)
 
 
-@pytest.mark.parametrize(
-    "origin", ["*", "localhost:3001", "http://localhost:3001/app", "ftp://localhost", "http://"]
-)
+@pytest.mark.parametrize("origin", ["*", "localhost:3001", "http://localhost:3001/app", "ftp://localhost", "http://"])
 async def test_cors_origins_must_be_exact(origin: str) -> None:
     """The CORS list doubles as the write allowlist, so a loose entry is a config error."""
     with pytest.raises(ValueError):
@@ -281,10 +275,27 @@ async def test_each_rejection_builds_its_own_exception() -> None:
     request's error context with another's."""
     seen: list[int] = []
     for secret in ("wrong-one", "wrong-two"):
-        token = jwt.encode(
-            {"sub": ACCOUNT_ID, "type": "access", "exp": 9999999999}, secret, algorithm="HS256"
-        )
+        token = jwt.encode({"sub": ACCOUNT_ID, "type": "access", "exp": 9999999999}, secret, algorithm="HS256")
         with pytest.raises(HTTPException) as exc:
             await get_caller(bearer(token), settings())
         seen.append(id(exc.value))
     assert seen[0] != seen[1]
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '["http://localhost:3001","http://localhost:3000"]',  # JSON, as pydantic writes it
+        "[http://localhost:3001,http://localhost:3000]",  # uv --env-file strips the quotes
+        "http://localhost:3001, http://localhost:3000",  # plain comma-separated
+    ],
+)
+def test_cors_origins_parses_every_env_spelling(raw: str) -> None:
+    """The documented run command uses `uv run --env-file`, which drops the inner
+    quotes of a JSON list. Decoding it as JSON would stop the app from starting."""
+    parsed = Settings(
+        database_url="postgresql+asyncpg://u:p@localhost:5432/db",  # type: ignore[arg-type]
+        jwt_secret=SECRET,  # type: ignore[arg-type]
+        cors_origins=raw,  # type: ignore[arg-type]
+    ).cors_origins
+    assert set(parsed) == {"http://localhost:3001", "http://localhost:3000"}

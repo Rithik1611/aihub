@@ -20,3 +20,5 @@ Superseding an old decision: write a new ADR, set the old one's status to
 | [0006](0006-authentication-and-ai-licence-claims.md) | cableCORE tokens plus AI licence claims | Accepted; CSRF part superseded by 0007 |
 | [0007](0007-csrf-by-origin-not-token.md) | CSRF by exact Origin and JSON-only writes, not a token | Accepted |
 | [0008](0008-feature-modules-with-a-shared-core.md) | Feature modules with a shared core | Accepted |
+| [0009](0009-agent-runs-in-process.md) | The agent runs in process; turns pause on cards | Proposed |
+| [0010](0010-uv-workspace.md) | One uv workspace for `ai/` and `backend/` | Proposed |
