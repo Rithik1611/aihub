@@ -487,7 +487,11 @@ async def main() -> int:
         # Without cableCORE credentials the script still verifies aihub on its own,
         # with a locally signed token; the checks that need cableCORE are skipped.
         live_cablecore = bool(user and password)
-        token = await sign_in(client, user, password) if live_cablecore else forge()
+        token = (
+            await sign_in(client, user, password)
+            if user is not None and password is not None
+            else forge()
+        )
         if not live_cablecore:
             print("VERIFY_USER/VERIFY_PASSWORD not set - running aihub-only checks")
 
@@ -495,7 +499,7 @@ async def main() -> int:
         unlicensed_password = os.environ.get("VERIFY_UNLICENSED_PASSWORD")
         unlicensed = (
             await sign_in(client, unlicensed_user, unlicensed_password)
-            if live_cablecore and unlicensed_user and unlicensed_password
+            if live_cablecore and unlicensed_user is not None and unlicensed_password is not None
             else None
         )
 

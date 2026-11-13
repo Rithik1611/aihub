@@ -68,3 +68,8 @@ ignore = ["S101"]  # assert is how tests assert
 "tests/*" = ["S105", "S106"]  # test fixtures carry obvious fake secrets
 "alembic/*" = ["E501"]
 "scripts/*" = ["E402", "S105"]  # path bootstrap before import; PASS is an outcome, not a secret
+
+[[tool.mypy.overrides]]
+# Used by the verification scripts to read cableCORE's own data; no stubs published.
+module = ["asyncpg"]
+ignore_missing_imports = true

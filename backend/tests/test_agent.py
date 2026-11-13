@@ -1,9 +1,11 @@
 """The agent adapter's pure parts: history from stored messages, card <-> frontend questions, sizes."""
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from ai.context import ApprovalCard, Question, QuestionCard, QuestionOption
 
 from app.chat import agent
@@ -110,3 +112,39 @@ def test_step_labels_match_the_panel() -> None:
     )
     assert agent.step_label("cc_action", {"actions": [{"id": "design.copy"}]}) == "Ran design.copy"
     assert agent.step_label("something_new", {}) == "something new"
+
+
+def test_claim_refuses_a_second_turn_in_the_same_session() -> None:
+    """The guard used to read _turns, then register the turn five awaits later, so two
+    requests arriving together both passed it and interleaved in the transcript."""
+    session, account = uuid.uuid4(), uuid.uuid4()
+    agent._turns.clear()
+    try:
+        first = agent.claim(session, account, True, "first")
+        assert first is not None
+        with pytest.raises(agent.TurnBusy):
+            agent.claim(session, account, False, "second")
+    finally:
+        agent._turns.clear()
+
+
+def test_claim_returns_the_paused_turn_so_the_answer_resumes_it() -> None:
+    session, account = uuid.uuid4(), uuid.uuid4()
+    agent._turns.clear()
+    try:
+        turn = agent.claim(session, account, True, "first")
+        assert turn is not None
+        turn.answer = asyncio.get_event_loop_policy().new_event_loop().create_future()
+        assert agent.claim(session, account, False, "the answer") is turn
+    finally:
+        agent._turns.clear()
+
+
+def test_claim_leaves_no_slot_for_the_stub_path() -> None:
+    session, account = uuid.uuid4(), uuid.uuid4()
+    agent._turns.clear()
+    try:
+        assert agent.claim(session, account, True, "x", stub=True) is None
+        assert session not in agent._turns
+    finally:
+        agent._turns.clear()

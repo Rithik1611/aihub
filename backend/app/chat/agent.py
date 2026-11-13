@@ -62,6 +62,31 @@ class Turn:
 _turns: dict[uuid.UUID, Turn] = {}
 
 
+def claim(
+    session_id: uuid.UUID, account_id: uuid.UUID, new_session: bool, message: str, *, stub: bool = False
+) -> Turn | None:
+    """Take the session's turn slot, or raise TurnBusy if a reply is already being written.
+
+    The check and the registration must not be separated by an await. They used to be:
+    the slot was taken only after the message was stored, so two requests arriving
+    together both passed the check and ran turns that interleaved in the transcript.
+    asyncio runs this synchronously, so claiming here is atomic.
+
+    Returns the paused turn when one is waiting for an answer, a fresh claimed turn
+    otherwise, and None for the stub path, which runs no turn.
+    """
+    existing = _turns.get(session_id)
+    if existing is not None:
+        if existing.answer is None:
+            raise TurnBusy
+        return existing  # paused on a card: this message is its answer
+    if stub:
+        return None
+    turn = Turn(session_id, account_id, new_session, message)
+    _turns[session_id] = turn
+    return turn
+
+
 def running_tasks(session_id: uuid.UUID) -> list[ChatTask]:
     """Live task rows of the session's turn (for /chat/progress)."""
     turn = _turns.get(session_id)
@@ -305,43 +330,55 @@ async def respond(
 ) -> AsyncIterator[dict[str, Any]]:
     """One request of a chat turn: the frontend's stream events, ending with `done` (a ChatReply) or `error`.
     The session must already exist and belong to the account."""
-    turn = _turns.get(session_id)
-    if turn is not None and turn.answer is None:
-        raise TurnBusy
-    async with SessionFactory() as db:
-        repo = ChatRepository(db)
-        history = (
-            None if turn else await repo.find_owned_session_recent_messages(session_id, account_id, HISTORY_MESSAGES)
-        )
-        meta = (
-            ChatMessageMetadata.model_validate({"attachment": {"name": attachment[0], "size": len(attachment[1])}})
-            if attachment
-            else None
-        )
-        human = await repo.create_message(session_id, ChatSender.HUMAN, message, meta)
-        await repo.set_last_active_session(account_id, session_id)
-        index = await repo.count_messages(session_id) - 1
-        await db.commit()
+    turn = claim(session_id, account_id, new_session, message, stub=stub)
+    resuming = turn is not None and turn.answer is not None
+    try:
+        async with SessionFactory() as db:
+            repo = ChatRepository(db)
+            history = (
+                None
+                if resuming
+                else await repo.find_owned_session_recent_messages(session_id, account_id, HISTORY_MESSAGES)
+            )
+            meta = (
+                ChatMessageMetadata.model_validate({"attachment": {"name": attachment[0], "size": len(attachment[1])}})
+                if attachment
+                else None
+            )
+            human = await repo.create_message(session_id, ChatSender.HUMAN, message, meta)
+            await repo.set_last_active_session(account_id, session_id)
+            index = await repo.count_messages(session_id) - 1
+            await db.commit()
+    except Exception:
+        # The claim is only released by _run's finally once the task exists; until
+        # then this request owns it, so a failure here must give the session back.
+        if turn is not None and not resuming:
+            _turns.pop(session_id, None)
+        raise
     yield {"type": "session", "sessionId": str(session_id), "userMessageId": str(human.id), "userMessageIndex": index}
 
     if stub:
-        turn = Turn(session_id, account_id, new_session, message)
-        reply = await _store_ai(turn, f"{STUB_PREFIX} You asked: {message}", None, None, None)
+        stub_turn = Turn(session_id, account_id, new_session, message)
+        reply = await _store_ai(stub_turn, f"{STUB_PREFIX} You asked: {message}", None, None, None)
         yield _done(reply, human.id, index)
         return
 
-    if turn is not None and turn.answer is not None and turn.card is not None:  # the answer to a paused turn
+    assert turn is not None  # claim() only returns None for the stub path, handled above
+    if resuming and turn.answer is not None and turn.card is not None:  # answer to a paused turn
         turn.covered.append(str(human.id))
         turn.answer.set_result(answer_for(turn.card, message))
     else:
-        turn = Turn(session_id, account_id, new_session, message, covered=[str(human.id)])
-        path = None
-        if attachment:
-            path = await sandbox.save_file(attachment[0], attachment[1], attachment[2], folder="uploads")
-        user_item = ai.user_message(message, (attachment[0], path) if attachment and path else None, page)
-        ctx = _context(turn, token, username, tickets)
-        _turns[session_id] = turn
-        turn.task = asyncio.create_task(_run(turn, ctx, history_items(history or []), user_item))
+        turn.covered.append(str(human.id))
+        try:
+            path = None
+            if attachment:
+                path = await sandbox.save_file(attachment[0], attachment[1], attachment[2], folder="uploads")
+            user_item = ai.user_message(message, (attachment[0], path) if attachment and path else None, page)
+            ctx = _context(turn, token, username, tickets)
+            turn.task = asyncio.create_task(_run(turn, ctx, history_items(history or []), user_item))
+        except Exception:
+            _turns.pop(session_id, None)
+            raise
 
     while True:
         event = await turn.events.get()
