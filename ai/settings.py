@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # LangSmith tracing of every model call (loop steps, checks, titles). Off by default: it sends chat
     # content to LangSmith (LANGSMITH_API_KEY, LANGSMITH_PROJECT, LANGSMITH_ENDPOINT for self-hosted).
     langsmith_tracing: bool = False
+    # Langfuse tracing: every model call, grouped as one trace per chat turn (session = chat). Keys are
+    # read by the Langfuse SDK itself: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL.
+    langfuse_tracing: bool = False
 
 
 @lru_cache

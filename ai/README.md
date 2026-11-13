@@ -80,6 +80,7 @@ A new app is a new folder in `apps/` exposing `instructions(ctx)`, `tools()` and
 | `AGENT_REASONING_EFFORT`, `AGENT_MAX_STEPS`, `SUBAGENTS_MAX_CONCURRENT`, `TOOL_RESULT_MAX_CHARS` | medium, 100, 6, 40000 | loop |
 | `CHECK_MODEL` | the chat model | model for the after-turn checks and titles |
 | `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` | off | LangSmith tracing of every model call. Sends chat content to LangSmith: use a self-hosted endpoint or clear it first |
+| `LANGFUSE_TRACING`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | off | Langfuse tracing (self-hosted): one trace per chat turn, session = chat, every model call nested under it. Traces contain chat content |
 
 All are declared and validated in [settings.py](settings.py).
 

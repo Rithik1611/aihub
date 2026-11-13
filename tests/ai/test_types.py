@@ -124,3 +124,8 @@ def test_tracing_wraps_the_model_client_only_when_enabled(monkeypatch):
     monkeypatch.setattr(http, '_llm', None)
     assert type(plain).__name__ == 'AsyncOpenAI' and traced is not plain
     assert hasattr(traced.responses, 'create')
+
+
+def test_ai_settings_module_is_not_shadowed():
+    import ai
+    assert callable(ai.settings.require)  # the backend calls ai.settings.require() at startup

@@ -19,6 +19,7 @@ dependencies = [
     "langsmith>=0.14.17",
     "truststore>=0.10.5",
     "pypdf>=7.0.1",
+    "langfuse>=5.2.0",
 ]
 
 [dependency-groups]
