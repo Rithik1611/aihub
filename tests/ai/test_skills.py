@@ -49,3 +49,29 @@ def test_deferred_tools_are_marked_only_with_tool_search(monkeypatch):
     monkeypatch.setattr(settings(), 'tool_search', True)
     assert t.spec()['defer_loading'] is True
     assert skills.tool_search_tool().spec() == {'type': 'tool_search'}
+
+
+def test_zero_match_hints_come_from_the_search_index(monkeypatch):
+    from ai.apps.cablecore import attributes
+    from ai.apps.cablecore.tools import _name_hint
+
+    async def keys(token):
+        return frozenset({'conductortype', 'noofconductors', 'layup.noelements', 'layup_conc.noelements'})
+
+    async def meta():
+        return {'conductortype': {'key': 'conductorType'}}
+
+    async def values(key):
+        return 10, [('CU', 8), ('AL', 2)]
+
+    monkeypatch.setattr(attributes, 'index_keys', keys)
+    monkeypatch.setattr(attributes, 'meta', meta)
+    monkeypatch.setattr(attributes, 'values', values)
+    def hint(f):
+        return asyncio.run(_name_hint(f, 'token'))
+
+    assert 'not a key in the search index' in hint({'field': 'noOfConductor', 'type': 'multi-path'})
+    assert 'noofconductors' in hint({'field': 'noOfConductor', 'type': 'multi-path'})
+    assert 'layup, layup_conc' in hint({'field': 'noElements', 'processName': 'STRANDING', 'type': 'process-attribute'})
+    assert 'CU (8)' in hint({'field': 'conductorType', 'type': 'multi-path'})  # right key, wrong value: show real values
+    assert hint({'field': 'designId', 'type': 'top-level'}) == ''

@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from ai import skills
 from ai.apps.cablecore import actions as harness
-from ai.apps.cablecore import api, formula, index, notes, records, related
+from ai.apps.cablecore import api, attributes, formula, index, notes, records, related
 from ai.apps.cablecore.actions import Action
 from ai.apps.cablecore.prompt import SKILLS, fill
 from ai.context import TurnContext
@@ -61,22 +61,27 @@ def _filter_text(f: dict[str, Any]) -> str | None:
     return forms.get(str(op))
 
 
-def _name_hint(f: dict[str, Any], plant_names: set[str], process_names: dict[str, set[str]]) -> str:
-    """Why a filter on its own matched nothing, when the field name is the cause."""
-    field = str(f.get('field'))
+async def _name_hint(f: dict[str, Any], token: str) -> str:
+    """Why a design filter on its own matched nothing: a key the search index does not have, or a value no design has."""
+    if f.get('type') == 'top-level':  # record fields (designId, …), not attributes
+        return ''
+    keys = await attributes.index_keys(token)
+    field = str(f.get('field') or '').lower()
+    key = f'{str(f["processName"]).lower()}.{field}' if f.get('processName') else field
+    if key in keys:  # the key is right, so no design has this value
+        stored = ((await attributes.meta()).get(key) or {}).get('key', key)
+        _count, common = await attributes.values(stored)
+        return f'; most common values of {stored}: {", ".join(f"{v} ({n})" for v, n in common)}' if common else ''
     if f.get('processName'):
-        processes = process_names.get(field)
-        if processes and f['processName'] not in processes:
-            return f'; process {f["processName"]} has no attribute {field} (processes that do: {", ".join(sorted(processes)[:6])})'
-        return ''
-    if field in plant_names or field in process_names:
-        return ''
-    lower = {n.lower(): n for n in plant_names}
-    close = [lower[n] for n in difflib.get_close_matches(field.lower(), list(lower), n=3, cutoff=0.5)]
-    return f'; {field} is not a design attribute' + (f' (similar: {", ".join(close)})' if close else '')
+        processes = sorted({k.split('.', 1)[0] for k in keys if k.endswith(f'.{field}')})
+        if processes:
+            return f'; process {f["processName"]} has no {field} in the search index (processes that do: {", ".join(processes[:8])})'
+    close = difflib.get_close_matches(key, list(keys), n=4, cutoff=0.6)
+    return (f'; {key} is not a key in the search index' + (f' (similar: {", ".join(close)})' if close else '')
+            + '; cc_attributes finds keys by meaning')
 
 
-async def _why_empty(path: str, token: str, body: dict[str, Any], parsed: dict[str, Any] | None) -> str:
+async def _why_empty(path: str, token: str, body: dict[str, Any], parsed: dict[str, Any] | None, kind: str) -> str:
     """For a search that matched nothing: how many each filter matches on its own, so the one to change is clear."""
     filters = [f for f in (parsed or {}).get('filters') or [] if isinstance(f, dict)]
     texts = [_filter_text(f) for f in filters]
@@ -88,12 +93,12 @@ async def _why_empty(path: str, token: str, body: dict[str, Any], parsed: dict[s
         return None if api.failed(status, data) else ((data or {}).get('pagination') or {}).get('total')
 
     counts = await asyncio.gather(*(count(t) for t in texts if t))
-    plant_names, process_names = await asyncio.to_thread(records.attribute_names)
     lines, it = [], iter(counts)
     for f, text in zip(filters, texts):
         if text:
             n = next(it)
-            lines.append(f'{text} -> {n} alone' + (_name_hint(f, plant_names, process_names) if n == 0 else ''))
+            hint = await _name_hint(f, token) if n == 0 and kind == 'design' else ''
+            lines.append(f'{text} -> {n} alone{hint}')
     if len(lines) == 1:
         return f'No matches: {lines[0]}'
     return 'Nothing matches all filters together. Each filter on its own:\n' + '\n'.join(lines)
@@ -111,9 +116,10 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
       process attributes      STRANDING.conductorCSA=300
       missing values          referenceStandard is null / is not null
       free words              fuzzy text over codes and descriptions: LV-7034, 2XWY
-    Attribute names are the ones cc_get shows in a design's header/process values. Free words match loosely
-    (a total in the thousands means they matched almost everything): narrow with attribute filters. When
-    nothing matches, the answer says how many each filter matches on its own and flags unknown field names.
+    Filter on attribute keys from the search index: cc_attributes finds the key for a property (e.g. what holds
+    the number of cores) with its stored values; do not guess names. Free words match loosely (a total in the
+    thousands means they matched almost everything). When nothing matches, the answer says how many each
+    filter matches on its own, flags keys the index does not have, and lists a key's common values.
 
     :param kind: design or enquiry
     :param query: the search in the query language above
@@ -137,7 +143,7 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     total = ((data or {}).get('pagination') or {}).get('total')
     parsed = (data or {}).get('parsedQuery')
     if total == 0:
-        return json.dumps({'total': 0, 'parsedQuery': parsed, 'why': await _why_empty(path, token, body, parsed)}, ensure_ascii=False)
+        return json.dumps({'total': 0, 'parsedQuery': parsed, 'why': await _why_empty(path, token, body, parsed, kind)}, ensure_ascii=False)
     result: dict[str, Any] = {'total': total, 'parsedQuery': parsed}
     if fields and kind == 'design':
         read_all = isinstance(total, int) and total <= FIELDS_READ_ALL_MAX
@@ -159,6 +165,24 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     # The answer is complete only on the last page.
     result.update(page=page, more=isinstance(total, int) and total > (page - 1) * body['pageSize'] + len(rows))
     return _within(result, [_compact_row(kind, r) for r in rows], SEARCH_MAX_CHARS)
+
+async def cc_attributes(ctx: TurnContext, words: list[str], process: str = '') -> str:
+    """
+    Find the search key for a design property before filtering on it, from the search index itself (not from
+    memory): every index key whose name or label contains one of the words, most used first, with its label,
+    type, how many designs have a value, and the most common stored values. Give the words the app may use and
+    your own synonyms: a property can be named differently from everyday terms (cores may be "elements" of a
+    lay-up process), and the same property can exist on several processes (one per product class).
+
+    :param words: words for the property, e.g. ["core", "element"], ["sheath", "jacket"], ["voltage"]
+    :param process: only keys of this process, e.g. LAYUP
+    :return: matching keys (use them as written in cc_search), most used first
+    """
+    total, rows = await attributes.find(_token(ctx), words, process)
+    if not rows:
+        return f'No key in the search index contains {", ".join(words)}. Try other words (synonyms, abbreviations).'
+    return json.dumps({'matching_keys': total, 'shown': len(rows), 'keys': rows}, ensure_ascii=False)
+
 
 async def cc_get(ctx: TurnContext, kind: Literal['design', 'enquiry', 'catalogue'], ref: str, process: str = '') -> str:
     """
@@ -321,6 +345,6 @@ async def cablecore_api_access(ctx: TurnContext, purpose: str) -> str:
 
 def tools() -> list[Tool]:
     found = [skills.tool_search_tool()] if settings().tool_search else []
-    return [tool(cc_search), tool(cc_get), tool(cc_related), tool(cc_formula), tool(cc_find), tool(cc_describe),
+    return [tool(cc_search), tool(cc_attributes), tool(cc_get), tool(cc_related), tool(cc_formula), tool(cc_find), tool(cc_describe),
             tool(cc_action, sequential=True), tool(cc_note), tool(cablecore_api_access, sequential=True, defer=True),
             skills.load_skill_tool(SKILLS, fill), *found]
