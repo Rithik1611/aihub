@@ -212,10 +212,6 @@ async def test_cookie_write_from_allowed_origin_is_accepted() -> None:
             "text/plain post (no preflight)",
             lambda: cookie_write(content_type="text/plain"),
         ),
-        (
-            "multipart post (no preflight)",
-            lambda: cookie_write(content_type="multipart/form-data"),
-        ),
         ("post without content type", lambda: cookie_write(content_type=None)),
         (
             "foreign origin on delete",
@@ -231,6 +227,13 @@ async def test_cookie_write_is_refused(name: str, request_factory: object) -> No
     with pytest.raises(HTTPException) as exc:
         await get_caller(request_factory(), allowed_settings())  # type: ignore[operator]
     assert exc.value.status_code == 403, name
+
+
+async def test_multipart_write_is_accepted() -> None:
+    """/chat/stream and /chat/send-with-file are multipart; the Origin check above is
+    what stops a cross-site write, so refusing multipart only broke real uploads."""
+    request = cookie_write(content_type="multipart/form-data; boundary=abc")
+    assert (await get_caller(request, allowed_settings())).account_id == uuid.UUID(ACCOUNT_ID)
 
 
 async def test_json_with_charset_is_accepted() -> None:

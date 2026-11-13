@@ -26,7 +26,11 @@ _REQUIRED_TOKEN_TYPE: Final = "access"  # noqa: S105  # a token type, not a secr
 # Methods that change state. CSRF is only a risk for these.
 _SAFE_METHODS: Final = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 
-_JSON: Final = "application/json"
+# Content types a chat write may legitimately carry: JSON for the API, multipart for
+# the file upload and the streaming turn. `text/plain` and form encoding are still
+# refused - no endpoint accepts them, and they are the shapes a cross-site form can
+# send without a preflight.
+_WRITE_TYPES: Final = frozenset({"application/json", "multipart/form-data"})
 
 
 # Built per raise, never shared: `raise X from exc` sets __cause__ and __traceback__
@@ -82,10 +86,12 @@ def _check_cross_site(request: Request, settings: Settings) -> None:
     facts do, and neither can be set by a page (docs/adr/0007):
 
     - `Origin` names the page that sent the request. It must match the allowlist
-      exactly; a missing Origin on a cookie-authenticated write is refused.
-    - A POST must be `application/json`. That content type is not CORS-safelisted,
-      so another site can only send it after a preflight aihub would refuse. Other
-      unsafe methods (PATCH, DELETE) always preflight.
+      exactly; a missing Origin on a cookie-authenticated write is refused. This is
+      what actually stops CSRF: a page cannot set it.
+    - A POST must carry a content type the API accepts (`_WRITE_TYPES`). Multipart
+      is CORS-safelisted and so needs no preflight, but the Origin check above has
+      already refused a foreign page; this only keeps shapes no endpoint serves,
+      like a plain form post, from reaching a handler at all.
 
     No token, no shared secret, nothing for the client to fetch. A Bearer token is
     never attached by the browser on its own, so Bearer requests are exempt.
@@ -103,7 +109,7 @@ def _check_cross_site(request: Request, settings: Settings) -> None:
         raise _cross_site_refused()
     if request.method == "POST":
         media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
-        if media_type != _JSON:
+        if media_type not in _WRITE_TYPES:
             logger.warning(
                 "cross-site write refused on POST %s: content-type %r",
                 request.url.path,

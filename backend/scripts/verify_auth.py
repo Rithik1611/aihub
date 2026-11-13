@@ -245,11 +245,28 @@ async def check_cross_site(client: httpx.AsyncClient, report: Report, token: str
             "form-encoded body",
             {"Origin": ALLOWED_ORIGIN, "Content-Type": "application/x-www-form-urlencoded"},
         ),
-        ("multipart body", {"Origin": ALLOWED_ORIGIN, "Content-Type": "multipart/form-data"}),
     ]
     for name, headers in refused:
         response = await client.post(f"{AIHUB}{SEND}", cookies=cookies, headers=headers, content=b'{"message":"x"}')
         report.record(group, name, 403, response.status_code)
+
+    response = remember(
+        await client.post(
+            f"{AIHUB}/api/chat/send-with-file",
+            cookies=cookies,
+            headers={"Origin": ALLOWED_ORIGIN},
+            files={"message": (None, "multipart probe")},
+        )
+    )
+    report.record(group, "multipart upload from allowed origin", 200, response.status_code)
+
+    response = await client.post(
+        f"{AIHUB}/api/chat/send-with-file",
+        cookies=cookies,
+        headers={"Origin": "https://evil.example"},
+        files={"message": (None, "multipart probe")},
+    )
+    report.record(group, "multipart upload from foreign origin", 403, response.status_code)
 
     response = await client.get(f"{AIHUB}{SESSIONS}", cookies=cookies)
     report.record(group, "cookie GET needs no origin", 200, response.status_code)

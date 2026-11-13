@@ -31,11 +31,17 @@ For a cookie-authenticated request with an unsafe method, aihub requires:
 1. an `Origin` header that exactly matches an entry in `CORS_ORIGINS` - scheme,
    host and port. Missing or `null` is refused. A page cannot set or forge
    `Origin`; the browser does.
-2. for POST, `Content-Type: application/json`. That type is not CORS-safelisted,
-   so no other site can send it without a preflight aihub refuses. The safelisted
-   types an attacker could use without a preflight - form posts, `text/plain`,
-   multipart - are refused outright rather than relying on the body failing to parse.
-   PATCH and DELETE always preflight, so they need only the Origin check.
+2. for POST, a `Content-Type` the API actually serves: `application/json` or
+   `multipart/form-data`. Anything else - a form post, `text/plain` - is refused
+   outright rather than relying on the body failing to parse. PATCH and DELETE
+   always preflight, so they need only the Origin check.
+
+   This started as JSON only, on the reasoning that JSON is not CORS-safelisted and
+   so cannot be sent cross-site without a preflight. Multipart **is** safelisted, but
+   refusing it blocked `/chat/stream` and `/chat/send-with-file` - both multipart -
+   for every browser, since the frontend authenticates with the cookie. The Origin
+   check is what actually stops CSRF; the content-type check only keeps shapes no
+   endpoint serves from reaching a handler. Allowing multipart costs nothing there.
 
 Bearer requests are exempt: the browser never attaches an `Authorization` header on
 its own, so it cannot be used cross-site.
