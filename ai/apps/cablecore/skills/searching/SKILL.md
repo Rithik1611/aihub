@@ -14,7 +14,7 @@ description: How to find designs by their properties (cores, size, conductor, vo
 A design's `description` reads like `0.6/1kV 3CX95mm² CU C2/PVC-ORANGE`, but it is written when the design is created and may be outdated. Use `description like %…%` only for a property that has no attribute with values, and say so. When you do, confirm the matches against attribute values (`fields`) where they exist.
 
 ## Precision
-- Attribute filters are precise. Free words are fuzzy text over many fields: `PVC` or `60502-1` alone match most of the database (totals in the thousands). Turn them into attribute filters.
+- Filters only: cc_search refuses free-text words (they match loosely across many fields). Every word of a request becomes a filter: a property → its attribute key, a design or enquiry code → `designId=` / `enquiryId=`, a customer → `customerName="…"`.
 - `like` patterns take no quotes: `description like %XLPE%`, not `'%XLPE%'`.
 
 ## When nothing matches
@@ -24,4 +24,4 @@ cc_search then lists each filter's count on its own. A filter with a key the ind
 `fields` adds attribute values to every row (keys as in `cc_attributes`); with at most 300 matches every page is read in one call. More than 300: add filters first.
 
 ## Query forms
-`key=value`, `key="text value"`, `key>=50`, `key between 16 and 25`, `key in (95,120)`, `key is null`, `key is not null`, `PROCESS.key=value`, `description like %…%`, `designId contains LV`.
+`key=value`, `key="text value"`, `key>=50`, `key between 16 and 25`, `key in (95,120)`, `key is null`, `key is not null`, `PROCESS.key=value`, `description like %…%`, `designId=LV-7034`, `designId contains LV`, `enquiryId=ENQ-0214`, `customerName="Cable_World"`, `status=Draft`.

@@ -75,3 +75,22 @@ def test_zero_match_hints_come_from_the_search_index(monkeypatch):
     assert 'layup, layup_conc' in hint({'field': 'noElements', 'processName': 'STRANDING', 'type': 'process-attribute'})
     assert 'CU (8)' in hint({'field': 'conductorType', 'type': 'multi-path'})  # right key, wrong value: show real values
     assert hint({'field': 'designId', 'type': 'top-level'}) == ''
+
+
+def test_cc_search_refuses_free_text(monkeypatch):
+    import json
+
+    from ai.apps.cablecore import api
+    from ai.apps.cablecore.tools import cc_search
+    from ai.context import TurnContext
+
+    async def fake_call(method, path, token, body=None, **kw):
+        terms = [w for w in body['query'].split() if '=' not in w]
+        return 201, {'data': [{'designId': 'LV-1'}], 'pagination': {'total': 4931},
+                     'parsedQuery': {'filters': [], 'textTerms': terms, 'orGroups': []}}
+
+    monkeypatch.setattr(api, 'call', fake_call)
+    ctx = TurnContext(user_id='u', user_email='u@x', cc_token='t', chat_id='c', wait_answer=None)  # type: ignore[arg-type]
+    out = json.loads(asyncio.run(cc_search(ctx, 'design', 'PVC conductorType=CU')))
+    assert 'refused' in out and 'PVC' in out['refused'] and 'rows' not in out
+    assert 'rows' in json.loads(asyncio.run(cc_search(ctx, 'design', 'conductorType=CU')))

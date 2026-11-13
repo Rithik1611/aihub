@@ -115,11 +115,12 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
       lists / patterns        conductorCSA in (95,120)   description like %XLPE%   designId contains LV
       process attributes      STRANDING.conductorCSA=300
       missing values          referenceStandard is null / is not null
-      free words              fuzzy text over codes and descriptions: LV-7034, 2XWY
-    Filter on attribute keys from the search index: cc_attributes finds the key for a property (e.g. what holds
-    the number of cores) with its stored values; do not guess names. Free words match loosely (a total in the
-    thousands means they matched almost everything). When nothing matches, the answer says how many each
-    filter matches on its own, flags keys the index does not have, and lists a key's common values.
+      records                 designId=LV-7034   designId contains 7034   enquiryId=ENQ-0214   customerName="Cable_World"
+    Only filters: free-text words are refused (they match loosely across many fields). Filter on attribute keys
+    from the search index: cc_attributes finds the key for a property (e.g. what holds the number of cores) with
+    its stored values; do not guess names. `description like %…%` is a fallback for a property with no attribute.
+    When nothing matches, the answer says how many each filter matches on its own, flags keys the index does not
+    have, and lists a key's common values.
 
     :param kind: design or enquiry
     :param query: the search in the query language above
@@ -142,6 +143,11 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     rows = (data or {}).get('data') or []
     total = ((data or {}).get('pagination') or {}).get('total')
     parsed = (data or {}).get('parsedQuery')
+    if words := (parsed or {}).get('textTerms'):
+        return json.dumps({'refused': f'Free-text words are not allowed: {", ".join(map(str, words))}. Use filters only: '
+                           'attribute keys from cc_attributes (key=value), designId=… / enquiryId=… for codes, '
+                           'customerName="…" for customers; description like %…% only for a property with no attribute.',
+                           'parsedQuery': parsed}, ensure_ascii=False)
     if total == 0:
         return json.dumps({'total': 0, 'parsedQuery': parsed, 'why': await _why_empty(path, token, body, parsed, kind)}, ensure_ascii=False)
     result: dict[str, Any] = {'total': total, 'parsedQuery': parsed}
