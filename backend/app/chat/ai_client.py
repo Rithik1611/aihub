@@ -56,18 +56,14 @@ class AiClient:
         self._url = base_url.rstrip("/")
         self._token = access_token
 
-    async def send(
-        self, session_id: str, history: list[dict[str, str]]
-    ) -> AiResponsePayload:
+    async def send(self, session_id: str, history: list[dict[str, str]]) -> AiResponsePayload:
         headers = {"Content-Type": "application/json"}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
         payload = {"sessionId": session_id, "messages": history, "mode": "DEFAULT"}
         try:
             async with httpx.AsyncClient(timeout=AI_TIMEOUT_SECONDS) as client:
-                response = await client.post(
-                    f"{self._url}/chat", json=payload, headers=headers
-                )
+                response = await client.post(f"{self._url}/chat", json=payload, headers=headers)
                 response.raise_for_status()
                 return AiResponsePayload.model_validate(response.json())
         except (httpx.HTTPError, ValidationError, ValueError) as exc:

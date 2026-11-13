@@ -1,36 +1,78 @@
-import logging
+"""Application wiring: lifespan, middleware, error handling, one router per module."""
 
-from fastapi import FastAPI, Request
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.config import get_settings
-from app.routers import chat, health
+from app.chat.router import router as chat_router
+from app.core.config import Settings, get_settings
+from app.core.db import dispose_engine
+from app.health.router import router as health_router
+
+logger = logging.getLogger(__name__)
+
+
+def _configure(settings: Settings) -> None:
+    logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO)
+    if settings.ai_stub and not settings.debug:
+        # A canned reply must never reach a real user.
+        raise RuntimeError("AI_STUB is a development setting and requires DEBUG=true")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Own the connection pool for the life of the app.
+
+    Without the dispose, pooled connections stay open through shutdown and reload,
+    leaking server-side sessions until Postgres times them out.
+    """
+    yield
+    await dispose_engine()
+
 
 settings = get_settings()
-logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO)
+_configure(settings)
 
-if settings.ai_stub and not settings.debug:
-    # A canned reply must never reach a real user.
-    raise RuntimeError("AI_STUB is a development setting and requires DEBUG=true")
+app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 
-app = FastAPI(title=settings.app_name, debug=settings.debug)
-
+# Explicit, not "*": with credentials allowed, every method and header listed here is
+# something another allowed origin may send with the user's cookie.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Retry-After"],
+    max_age=600,
 )
+
+
+@app.middleware("http")
+async def security_headers(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Responses carry a user's conversations, so nothing between aihub and the
+    browser should sniff, frame or cache them."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
     """Details go to the log; the client gets nothing that describes the failure."""
-    logging.exception("unhandled error on %s %s", request.method, request.url.path)
+    logger.exception("unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
-app.include_router(health.router, prefix="/api")
-app.include_router(chat.router, prefix="/api")
+# One line per feature module; each owns its own prefix and tags.
+app.include_router(health_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")

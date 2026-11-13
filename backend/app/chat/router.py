@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import CurrentCaller, extract_token
 from app.chat.ai_client import AiClient, AiServiceUnavailable, build_history, stub_response
 from app.chat.repository import ChatRepository
 from app.chat.schemas import (
@@ -32,8 +31,10 @@ from app.chat.schemas import (
     SessionSummary,
     UpdateSessionName,
 )
-from app.config import Settings, get_settings
-from app.db import get_session
+from app.core.auth import extract_token
+from app.core.config import Settings, get_settings
+from app.core.db import get_session
+from app.core.rate_limit import ThrottledCaller
 
 logger = logging.getLogger(__name__)
 
@@ -58,16 +59,6 @@ Repository = Annotated[ChatRepository, Depends(get_repository)]
 Config = Annotated[Settings, Depends(get_settings)]
 
 
-def _account_id(caller_account_id: str) -> uuid.UUID:
-    try:
-        return uuid.UUID(caller_account_id)
-    except ValueError as exc:
-        # A well-signed token whose subject is not an account id is not usable here.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
-        ) from exc
-
-
 def _require_default(mode: ChatMode) -> None:
     """aihub stores normal chat only; anything else still belongs to cableCORE."""
     if mode is not ChatMode.DEFAULT:
@@ -81,7 +72,7 @@ def _require_default(mode: ChatMode) -> None:
 async def send_message(
     body: SendMessage,
     request: Request,
-    caller: CurrentCaller,
+    caller: ThrottledCaller,
     repo: Repository,
     settings: Config,
 ) -> ApiResponse[ChatReply]:
@@ -91,7 +82,7 @@ async def send_message(
     never loses what the user typed - the same order cableCORE uses.
     """
     _require_default(body.mode)
-    account_id = _account_id(caller.account_id)
+    account_id = caller.account_id
 
     if body.session_id is None:
         try:
@@ -141,9 +132,7 @@ async def send_message(
         complete=answer.complete or None,
         stopped=answer.cancelled or None,
     )
-    ai_message = await repo.create_message(
-        session_id, ChatSender.AI, reply_text, metadata
-    )
+    ai_message = await repo.create_message(session_id, ChatSender.AI, reply_text, metadata)
     await repo.set_session_suggestions(session_id, account_id, answer.suggestions)
 
     return ApiResponse(
@@ -170,12 +159,12 @@ async def send_message(
 
 @router.get("/sessions", response_model=ApiResponse[list[SessionSummary]])
 async def list_sessions(
-    caller: CurrentCaller,
+    caller: ThrottledCaller,
     repo: Repository,
     mode: ChatMode = ChatMode.DEFAULT,
 ) -> ApiResponse[list[SessionSummary]]:
     _require_default(mode)
-    rows = await repo.find_user_sessions(_account_id(caller.account_id))
+    rows = await repo.find_user_sessions(caller.account_id)
     return ApiResponse(
         status_code=status.HTTP_200_OK,
         message="User sessions retrieved successfully",
@@ -197,11 +186,9 @@ async def list_sessions(
 
 @router.get("/sessions/{session_id}/messages", response_model=ApiResponse[SessionMessages])
 async def get_session_messages(
-    session_id: SessionId, caller: CurrentCaller, repo: Repository
+    session_id: SessionId, caller: ThrottledCaller, repo: Repository
 ) -> ApiResponse[SessionMessages]:
-    session = await repo.find_owned_session_with_messages(
-        session_id, _account_id(caller.account_id)
-    )
+    session = await repo.find_owned_session_with_messages(session_id, caller.account_id)
     if session is None:
         raise _SESSION_NOT_FOUND
     return ApiResponse(
@@ -231,9 +218,9 @@ async def get_session_messages(
 
 @router.delete("/sessions/{session_id}", response_model=ApiResponse[None])
 async def delete_session(
-    session_id: SessionId, caller: CurrentCaller, repo: Repository
+    session_id: SessionId, caller: ThrottledCaller, repo: Repository
 ) -> ApiResponse[None]:
-    account_id = _account_id(caller.account_id)
+    account_id = caller.account_id
     if await repo.delete_owned_session(session_id, account_id) == 0:
         raise _SESSION_NOT_FOUND
     await repo.clear_last_active_session(account_id, session_id)
@@ -244,9 +231,9 @@ async def delete_session(
 
 @router.patch("/sessions/{session_id}/name", response_model=ApiResponse[SessionName])
 async def rename_session(
-    session_id: SessionId, body: UpdateSessionName, caller: CurrentCaller, repo: Repository
+    session_id: SessionId, body: UpdateSessionName, caller: ThrottledCaller, repo: Repository
 ) -> ApiResponse[SessionName]:
-    if await repo.rename_owned_session(session_id, _account_id(caller.account_id), body.name) == 0:
+    if await repo.rename_owned_session(session_id, caller.account_id, body.name) == 0:
         raise _SESSION_NOT_FOUND
     return ApiResponse(
         status_code=status.HTTP_200_OK,
@@ -257,11 +244,9 @@ async def rename_session(
 
 @router.patch("/sessions/{session_id}/pin", response_model=ApiResponse[SessionPin])
 async def pin_session(
-    session_id: SessionId, body: PinSession, caller: CurrentCaller, repo: Repository
+    session_id: SessionId, body: PinSession, caller: ThrottledCaller, repo: Repository
 ) -> ApiResponse[SessionPin]:
-    updated = await repo.set_owned_session_pinned(
-        session_id, _account_id(caller.account_id), body.is_pinned
-    )
+    updated = await repo.set_owned_session_pinned(session_id, caller.account_id, body.is_pinned)
     if updated == 0:
         raise _SESSION_NOT_FOUND
     return ApiResponse(
@@ -273,14 +258,14 @@ async def pin_session(
 
 @router.get("/last-active", response_model=ApiResponse[LastActive])
 async def last_active_session(
-    caller: CurrentCaller,
+    caller: ThrottledCaller,
     repo: Repository,
     mode: ChatMode | None = None,
 ) -> ApiResponse[LastActive]:
     """The session the caller was last in, if it still exists and is still theirs."""
     if mode is not None:
         _require_default(mode)
-    account_id = _account_id(caller.account_id)
+    account_id = caller.account_id
     candidate = await repo.find_last_active_session_id(account_id)
     if candidate is None or not await repo.is_session_owned(candidate, account_id):
         candidate = None

@@ -59,15 +59,11 @@ class _Camel(BaseModel):
 class _Request(_Camel):
     """Anything a client sends: an unknown field is a client bug, not something to drop."""
 
-    model_config = ConfigDict(
-        alias_generator=to_camel, populate_by_name=True, extra="forbid"
-    )
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
 
 class _Response(_Camel):
-    model_config = ConfigDict(
-        alias_generator=to_camel, populate_by_name=True, from_attributes=True
-    )
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
 
 
 class _Payload(_Camel):

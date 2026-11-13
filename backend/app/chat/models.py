@@ -5,7 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base
+from app.core.db import Base
 
 DEFAULT_SESSION_NAME = "New Session"
 
@@ -71,7 +71,8 @@ class ChatMessage(Base):
     # none_as_null: without it SQLAlchemy writes JSON `null` instead of SQL NULL,
     # so `metadata IS NULL` would never match a message that has no metadata.
     message_metadata: Mapped[dict[str, object] | None] = mapped_column(
-        "metadata", JSONB(none_as_null=True)  # type: ignore[no-untyped-call]  # JSONB.__init__ is untyped upstream
+        "metadata",
+        JSONB(none_as_null=True),  # type: ignore[no-untyped-call]  # JSONB.__init__ is untyped upstream
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

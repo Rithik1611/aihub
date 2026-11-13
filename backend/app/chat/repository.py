@@ -229,9 +229,7 @@ class ChatRepository:
             existing.session_id = session_id
         await self._db.flush()
 
-    async def clear_last_active_session(
-        self, account_id: uuid.UUID, session_id: uuid.UUID
-    ) -> None:
+    async def clear_last_active_session(self, account_id: uuid.UUID, session_id: uuid.UUID) -> None:
         """Clears only if it still points at this session, so a newer one is not lost."""
         stmt = (
             update(LastActiveSession)

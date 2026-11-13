@@ -55,7 +55,9 @@ def _state_fits(state: dict[str, object]) -> bool:
 def clamp_metadata(metadata: ChatMessageMetadata) -> ChatMessageMetadata:
     """Return a copy with every field bounded. Oversized state is dropped, not truncated."""
     return ChatMessageMetadata(
-        state=metadata.state if metadata.state is not None and _state_fits(metadata.state) else None,
+        state=(
+            metadata.state if metadata.state is not None and _state_fits(metadata.state) else None
+        ),
         suggestions=(
             [_clamp_text(s) for s in metadata.suggestions[:MAX_SUGGESTIONS]]
             if metadata.suggestions is not None

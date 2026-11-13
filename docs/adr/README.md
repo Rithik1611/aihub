@@ -16,3 +16,7 @@ Superseding an old decision: write a new ADR, set the old one's status to
 | [0002](0002-fastapi-backend-in-single-repo.md) | FastAPI backend in a single repo | Accepted |
 | [0003](0003-uv-for-dependency-management.md) | uv for dependency management | Accepted |
 | [0004](0004-chat-history-in-aihub-own-postgres.md) | Normal-chat history in aihub on its own Postgres | Accepted |
+| [0005](0005-chat-api-wire-compatible-with-cablecore.md) | Chat API wire-compatible with cableCORE's | Accepted |
+| [0006](0006-authentication-and-ai-licence-claims.md) | cableCORE tokens plus AI licence claims | Accepted; CSRF part superseded by 0007 |
+| [0007](0007-csrf-by-origin-not-token.md) | CSRF by exact Origin and JSON-only writes, not a token | Accepted |
+| [0008](0008-feature-modules-with-a-shared-core.md) | Feature modules with a shared core | Accepted |
