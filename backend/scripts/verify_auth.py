@@ -27,120 +27,40 @@ import os
 import sys
 import uuid
 from collections.abc import Coroutine
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from pathlib import Path
 
 import httpx
 import jwt
 
-# Run from anywhere: the app package lives one level up.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import get_settings
+from scripts.verification import (
+    AIHUB,
+    ALLOWED_ORIGIN,
+    CABLECORE,
+    SEND,
+    SESSIONS,
+    TIMEOUT,
+    Report,
+    Sessions,
+    bearer,
+    chat_body,
+    claims_of,
+    forge,
+    sign_in,
+)
 
-AIHUB = os.environ.get("AIHUB_URL", "http://127.0.0.1:8010")
-CABLECORE = os.environ.get("CABLECORE_URL", "http://localhost:5000")
-ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "http://localhost:3001")
-TIMEOUT = httpx.Timeout(30.0)
+# Sessions this run creates, deleted before it exits.
+sessions = Sessions()
 
-SESSIONS = "/api/chat/sessions"
-SEND = "/api/chat/send"
+# Run from anywhere: the app package lives one level up.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 # Sessions this run created, deleted before it exits: a verification script must not
 # leave rows behind in the database it is verifying.
-_created: list[str] = []
-
-
-def bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
-
-
-def remember(response: httpx.Response) -> httpx.Response:
-    """Track a session this run created so it can be cleaned up."""
-    if response.status_code == 200:
-        session_id = response.json().get("data", {}).get("sessionId")
-        if session_id:
-            _created.append(str(session_id))
-    return response
-
-
-async def cleanup(client: httpx.AsyncClient, token: str, report: Report) -> None:
-    removed = 0
-    for session_id in _created:
-        response = await client.delete(f"{AIHUB}/api/chat/sessions/{session_id}", headers=bearer(token))
-        removed += 1 if response.status_code == 200 else 0
-    report.record("cleanup", "sessions created by this run removed", len(_created), removed)
-
-
-class Outcome(StrEnum):
-    PASS = "PASS"
-    FAIL = "FAIL"
-    SKIP = "SKIP"
-
-
-@dataclass(frozen=True)
-class Check:
-    group: str
-    name: str
-    expected: str
-    actual: str
-    outcome: Outcome
-
-
-@dataclass
-class Report:
-    checks: list[Check] = field(default_factory=list)
-
-    def record(self, group: str, name: str, expected: object, actual: object) -> None:
-        outcome = Outcome.PASS if expected == actual else Outcome.FAIL
-        self.checks.append(Check(group, name, str(expected), str(actual), outcome))
-
-    def skip(self, group: str, name: str, why: str) -> None:
-        self.checks.append(Check(group, name, "-", why, Outcome.SKIP))
-
-    @property
-    def failed(self) -> list[Check]:
-        return [c for c in self.checks if c.outcome is Outcome.FAIL]
-
-
-def body(message: str = "verification probe") -> dict[str, object]:
-    return {"message": message, "mode": "DEFAULT", "sessionId": None, "newSessionId": None}
-
-
-async def sign_in(client: httpx.AsyncClient, user: str, password: str) -> str:
-    """A real cableCORE access token, via the plain-password endpoint."""
-    response = await client.post(f"{CABLECORE}/auth/token", json={"username": user, "password": password})
-    response.raise_for_status()
-    token: str = response.json()["data"]["accessToken"]
-    return token
-
-
-def claims_of(token: str) -> dict[str, object]:
-    decoded: dict[str, object] = jwt.decode(token, options={"verify_signature": False})
-    return decoded
-
-
-def forge(**overrides: object) -> str:
-    """A token signed with the real secret, so only the claims under test differ."""
-    settings = get_settings()
-    now = datetime.now(UTC)
-    payload: dict[str, object] = {
-        "sub": str(uuid.uuid4()),
-        "username": "forged",
-        "role": "DESIGNER",
-        "type": "access",
-        "activePlantId": str(uuid.uuid4()),
-        "canAccessAi": True,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=5)).timestamp()),
-    }
-    payload.update(overrides)
-    for key, value in list(payload.items()):
-        if value is None:
-            del payload[key]
-    return jwt.encode(payload, settings.jwt_secret.get_secret_value(), algorithm=settings.jwt_algorithm)
 
 
 async def check_authentication(client: httpx.AsyncClient, report: Report, token: str) -> None:
@@ -221,7 +141,9 @@ async def check_cross_site(client: httpx.AsyncClient, report: Report, token: str
     cookies = {"access_token": token}
 
     allowed = {"Origin": ALLOWED_ORIGIN, "Content-Type": "application/json"}
-    response = remember(await client.post(f"{AIHUB}{SEND}", cookies=cookies, headers=allowed, json=body()))
+    response = sessions.remember(
+        await client.post(f"{AIHUB}{SEND}", cookies=cookies, headers=allowed, json=chat_body())
+    )
     report.record(group, "cookie POST from allowed origin", 200, response.status_code)
 
     refused: list[tuple[str, dict[str, str]]] = [
@@ -250,7 +172,7 @@ async def check_cross_site(client: httpx.AsyncClient, report: Report, token: str
         response = await client.post(f"{AIHUB}{SEND}", cookies=cookies, headers=headers, content=b'{"message":"x"}')
         report.record(group, name, 403, response.status_code)
 
-    response = remember(
+    response = sessions.remember(
         await client.post(
             f"{AIHUB}/api/chat/send-with-file",
             cookies=cookies,
@@ -271,11 +193,11 @@ async def check_cross_site(client: httpx.AsyncClient, report: Report, token: str
     response = await client.get(f"{AIHUB}{SESSIONS}", cookies=cookies)
     report.record(group, "cookie GET needs no origin", 200, response.status_code)
 
-    response = remember(
+    response = sessions.remember(
         await client.post(
             f"{AIHUB}{SEND}",
             headers={**bearer(token), "Origin": "https://evil.example"},
-            json=body(),
+            json=chat_body(),
         )
     )
     report.record(group, "bearer POST is exempt", 200, response.status_code)
@@ -348,7 +270,9 @@ async def check_security_headers(client: httpx.AsyncClient, report: Report) -> N
 async def check_tenant_isolation(client: httpx.AsyncClient, report: Report, token: str) -> None:
     """One account must never reach another's conversation."""
     group = "isolation"
-    mine = remember(await client.post(f"{AIHUB}{SEND}", headers=bearer(token), json=body("isolation probe")))
+    mine = sessions.remember(
+        await client.post(f"{AIHUB}{SEND}", headers=bearer(token), json=chat_body("isolation probe"))
+    )
     if mine.status_code != 200:
         report.skip(group, "setup: create a session", f"send returned {mine.status_code}")
         return
@@ -384,11 +308,11 @@ async def check_input_validation(client: httpx.AsyncClient, report: Report, toke
     group = "validation"
     auth = bearer(token)
     cases: list[tuple[str, dict[str, object], int]] = [
-        ("unknown field refused", {**body(), "evil": "x"}, 422),
-        ("empty message refused", {**body(), "message": ""}, 422),
-        ("over-long message refused", {**body(), "message": "x" * 4001}, 422),
-        ("non-DEFAULT mode refused", {**body(), "mode": "FORMULA"}, 400),
-        ("bad session id refused", {**body(), "sessionId": "not-a-uuid"}, 422),
+        ("unknown field refused", {**chat_body(), "evil": "x"}, 422),
+        ("empty message refused", {**chat_body(), "message": ""}, 422),
+        ("over-long message refused", {**chat_body(), "message": "x" * 4001}, 422),
+        ("non-DEFAULT mode refused", {**chat_body(), "mode": "FORMULA"}, 400),
+        ("bad session id refused", {**chat_body(), "sessionId": "not-a-uuid"}, 422),
     ]
     for name, payload, expected in cases:
         response = await client.post(f"{AIHUB}{SEND}", headers=auth, json=payload)
@@ -462,22 +386,6 @@ async def check_rate_limit(client: httpx.AsyncClient, report: Report, token: str
     report.record(group, "another account is unaffected", 200, other.status_code)
 
 
-def render(report: Report) -> None:
-    width = max(len(c.name) for c in report.checks) + 2
-    current = ""
-    for check in report.checks:
-        if check.group != current:
-            current = check.group
-            print(f"\n{current.upper()}")
-        mark = {Outcome.PASS: "ok  ", Outcome.FAIL: "FAIL", Outcome.SKIP: "skip"}[check.outcome]
-        detail = f"expected {check.expected}, got {check.actual}" if check.outcome is Outcome.FAIL else check.actual
-        print(f"  [{mark}] {check.name:<{width}} {detail}")
-
-    passed = sum(1 for c in report.checks if c.outcome is Outcome.PASS)
-    skipped = sum(1 for c in report.checks if c.outcome is Outcome.SKIP)
-    print(f"\n{passed} passed, {len(report.failed)} failed, {skipped} skipped")
-
-
 async def main() -> int:
     user = os.environ.get("VERIFY_USER")
     password = os.environ.get("VERIFY_PASSWORD")
@@ -487,18 +395,14 @@ async def main() -> int:
         # Without cableCORE credentials the script still verifies aihub on its own,
         # with a locally signed token; the checks that need cableCORE are skipped.
         live_cablecore = bool(user and password)
-        token = (
-            await sign_in(client, user, password)
-            if user is not None and password is not None
-            else forge()
-        )
+        token = (await sign_in(client, user, password)).access if user is not None and password is not None else forge()
         if not live_cablecore:
             print("VERIFY_USER/VERIFY_PASSWORD not set - running aihub-only checks")
 
         unlicensed_user = os.environ.get("VERIFY_UNLICENSED_USER")
         unlicensed_password = os.environ.get("VERIFY_UNLICENSED_PASSWORD")
         unlicensed = (
-            await sign_in(client, unlicensed_user, unlicensed_password)
+            (await sign_in(client, unlicensed_user, unlicensed_password)).access
             if live_cablecore and unlicensed_user is not None and unlicensed_password is not None
             else None
         )
@@ -530,7 +434,7 @@ async def main() -> int:
 
         # Before the rate-limit burst: DELETE is throttled like any other chat call,
         # so cleanup after it would be refused. Always runs, even if a group raised.
-        await cleanup(client, token, report)
+        await sessions.cleanup(client, token, report)
 
         # Last: it spends the account's budget for the rest of the window.
         try:
@@ -538,8 +442,8 @@ async def main() -> int:
         except Exception as exc:
             report.record("rate limit", "group completed", True, f"raised {type(exc).__name__}")
 
-    render(report)
-    return 1 if report.failed else 0
+    report.render()
+    return report.exit_code()
 
 
 if __name__ == "__main__":

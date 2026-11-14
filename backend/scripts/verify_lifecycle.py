@@ -27,89 +27,33 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from itertools import pairwise
 from pathlib import Path
 
 import httpx
-import jwt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.config import get_settings
+from scripts.verification import (
+    AIHUB,
+    CABLECORE,
+    SEND,
+    SESSIONS,
+    TIMEOUT,
+    Report,
+    Sessions,
+    Tokens,
+    bearer,
+    claims_of,
+    reissue,
+    sign_in,
+)
 
-AIHUB = os.environ.get("AIHUB_URL", "http://127.0.0.1:8010")
-CABLECORE = os.environ.get("CABLECORE_URL", "http://localhost:5000")
-TIMEOUT = httpx.Timeout(60.0)
+# Sessions this run creates, deleted before it exits.
+sessions = Sessions()
 
-SESSIONS = "/api/chat/sessions"
-SEND = "/api/chat/send"
-
-
-class Outcome(StrEnum):
-    PASS = "PASS"
-    FAIL = "FAIL"
-    SKIP = "SKIP"
-    NOTE = "NOTE"
-
-
-@dataclass(frozen=True)
-class Check:
-    group: str
-    name: str
-    detail: str
-    outcome: Outcome
-
-
-@dataclass
-class Report:
-    checks: list[Check] = field(default_factory=list)
-
-    def record(self, group: str, name: str, expected: object, actual: object) -> None:
-        ok = expected == actual
-        detail = str(actual) if ok else f"expected {expected}, got {actual}"
-        self.checks.append(Check(group, name, detail, Outcome.PASS if ok else Outcome.FAIL))
-
-    def note(self, group: str, name: str, detail: str) -> None:
-        """A finding that is neither pass nor fail: behaviour worth stating."""
-        self.checks.append(Check(group, name, detail, Outcome.NOTE))
-
-    def skip(self, group: str, name: str, why: str) -> None:
-        self.checks.append(Check(group, name, why, Outcome.SKIP))
-
-    @property
-    def failed(self) -> list[Check]:
-        return [c for c in self.checks if c.outcome is Outcome.FAIL]
-
-
-def bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
-
-
-def claims_of(token: str) -> dict[str, object]:
-    decoded: dict[str, object] = jwt.decode(token, options={"verify_signature": False})
-    return decoded
-
-
-def reissue(base: dict[str, object], **overrides: object) -> str:
-    """Re-sign a real token's claims with the configured secret, changing only what is
-    under test. The signature stays valid, so the check is of aihub's rules and not of
-    its signature verification."""
-    settings = get_settings()
-    payload = {**base, **overrides}
-    for key, value in list(payload.items()):
-        if value is None:
-            del payload[key]
-    return jwt.encode(payload, settings.jwt_secret.get_secret_value(), algorithm=settings.jwt_algorithm)
-
-
-async def sign_in(client: httpx.AsyncClient, user: str, password: str) -> dict[str, str]:
-    response = await client.post(f"{CABLECORE}/auth/token", json={"username": user, "password": password})
-    response.raise_for_status()
-    data: dict[str, str] = response.json()["data"]
-    return data
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 async def start_chat(client: httpx.AsyncClient, token: str, message: str) -> str | None:
@@ -128,10 +72,10 @@ async def start_chat(client: httpx.AsyncClient, token: str, message: str) -> str
 # --- scenario A: the 15-minute token ------------------------------------------
 
 
-async def check_expiry_and_refresh(client: httpx.AsyncClient, report: Report, tokens: dict[str, str]) -> None:
+async def check_expiry_and_refresh(client: httpx.AsyncClient, report: Report, tokens: Tokens) -> None:
     """After 15 minutes the token is dead. Is the user locked out, or refreshed?"""
     group = "A. expiry and refresh"
-    token = tokens["accessToken"]
+    token = tokens.access
     base = claims_of(token)
 
     lifetime = (int(str(base["exp"])) - int(str(base["iat"]))) // 60
@@ -147,7 +91,7 @@ async def check_expiry_and_refresh(client: httpx.AsyncClient, report: Report, to
     report.record(group, "seconds of clock drift do not lock out", 200, response.status_code)
 
     # What the frontend does on that 401: refresh against cableCORE.
-    refreshed = await client.post(f"{CABLECORE}/auth/refresh", cookies={"refresh_token": tokens["refreshToken"]})
+    refreshed = await client.post(f"{CABLECORE}/auth/refresh", cookies={"refresh_token": tokens.refresh})
     report.record(group, "cableCORE refresh succeeds", 200, refreshed.status_code)
     new_token = refreshed.cookies.get("access_token")
     report.record(group, "refresh issues a new access token", True, new_token is not None)
@@ -206,13 +150,13 @@ async def plant_licence(db_url: str, account: str, plant: str) -> bool:
 async def check_plant_switch(
     client: httpx.AsyncClient,
     report: Report,
-    tokens: dict[str, str],
+    tokens: Tokens,
     alt_plant: str | None,
     db_url: str | None,
 ) -> None:
     """Switching plant changes which licence applies. Does aihub follow?"""
     group = "B. plant switch"
-    token = tokens["accessToken"]
+    token = tokens.access
     base = claims_of(token)
     account = str(base["sub"])
     original = str(base.get("activePlantId"))
@@ -274,14 +218,12 @@ async def check_plant_switch(
     report.record(group, "original plant restored", 200, restored.status_code)
 
 
-async def check_unlicensed_account(
-    client: httpx.AsyncClient, report: Report, unlicensed: dict[str, str] | None
-) -> None:
+async def check_unlicensed_account(client: httpx.AsyncClient, report: Report, unlicensed: Tokens | None) -> None:
     group = "B. plant switch"
     if unlicensed is None:
         report.skip(group, "a real unlicensed account is refused", "VERIFY_UNLICENSED_USER not set")
         return
-    token = unlicensed["accessToken"]
+    token = unlicensed.access
     claims = claims_of(token)
     report.record(group, "cableCORE marks the account unlicensed", False, claims.get("canAccessAi"))
     response = await client.get(f"{AIHUB}{SESSIONS}", headers=bearer(token))
@@ -356,35 +298,10 @@ async def check_concurrent_turns(client: httpx.AsyncClient, report: Report, toke
     # and interleaved the transcript.
     report.record(group, "one turn runs, the second is refused with 409", [200, 409], codes)
 
-    messages = await client.get(
-        f"{AIHUB}/api/chat/sessions/{session_id}/messages", headers=bearer(token)
-    )
+    messages = await client.get(f"{AIHUB}/api/chat/sessions/{session_id}/messages", headers=bearer(token))
     senders = [m["sender"] for m in (messages.json().get("data") or {}).get("messages", [])]
     alternating = all(a != b for a, b in pairwise(senders))
     report.record(group, "the transcript still alternates human/ai", True, alternating)
-
-
-async def cleanup(client: httpx.AsyncClient, report: Report, token: str, created: list[str]) -> None:
-    removed = 0
-    for session_id in created:
-        response = await client.delete(f"{AIHUB}/api/chat/sessions/{session_id}", headers=bearer(token))
-        removed += 1 if response.status_code == 200 else 0
-    report.record("cleanup", "sessions created by this run removed", len(created), removed)
-
-
-def render(report: Report) -> None:
-    width = max(len(c.name) for c in report.checks) + 2
-    current = ""
-    marks = {Outcome.PASS: "ok  ", Outcome.FAIL: "FAIL", Outcome.SKIP: "skip", Outcome.NOTE: "note"}
-    for check in report.checks:
-        if check.group != current:
-            current = check.group
-            print(f"\n{current.upper()}")
-        print(f"  [{marks[check.outcome]}] {check.name:<{width}} {check.detail}")
-    passed = sum(1 for c in report.checks if c.outcome is Outcome.PASS)
-    skipped = sum(1 for c in report.checks if c.outcome is Outcome.SKIP)
-    notes = sum(1 for c in report.checks if c.outcome is Outcome.NOTE)
-    print(f"\n{passed} passed, {len(report.failed)} failed, {skipped} skipped, {notes} notes")
 
 
 async def main() -> int:
@@ -398,7 +315,7 @@ async def main() -> int:
     created: list[str] = []
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
         tokens = await sign_in(client, user, password)
-        token = tokens["accessToken"]
+        token = tokens.access
 
         un_user = os.environ.get("VERIFY_UNLICENSED_USER")
         un_password = os.environ.get("VERIFY_UNLICENSED_PASSWORD")
@@ -426,10 +343,10 @@ async def main() -> int:
             except Exception as exc:
                 report.record(name, "group completed", True, f"raised {type(exc).__name__}: {exc}")
 
-        await cleanup(client, report, token, created)
+        await sessions.cleanup(client, token, report)
 
-    render(report)
-    return 1 if report.failed else 0
+    report.render()
+    return report.exit_code()
 
 
 if __name__ == "__main__":

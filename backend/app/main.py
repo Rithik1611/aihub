@@ -43,7 +43,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 settings = get_settings()
 _configure(settings)
 
-app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
+# The schema names every route, including the sandbox's cableCORE gateway, and is a
+# map of the attack surface. Served in development only; openapi_url=None also turns
+# off /docs and /redoc.
+app = FastAPI(
+    title=settings.app_name,
+    debug=settings.debug,
+    lifespan=lifespan,
+    openapi_url="/openapi.json" if settings.debug else None,
+)
 
 # Explicit, not "*": with credentials allowed, every method and header listed here is
 # something another allowed origin may send with the user's cookie.
