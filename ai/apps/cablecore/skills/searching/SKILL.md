@@ -1,6 +1,6 @@
 ---
 name: searching
-description: How to find designs by their properties (cores, size, conductor, voltage, layers) with exact counts - qualified attribute keys from the search index, versions, value formats, and why a search returns nothing or thousands. Load before searching designs by their properties.
+description: Troubleshooting design searches - nothing or thousands found, a count that looks wrong, one property under several keys, template defaults, is-null. Ordinary searches need only the cc_search/cc_attributes descriptions.
 ---
 # Searching designs by their properties
 

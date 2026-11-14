@@ -80,19 +80,32 @@ def test_zero_match_hints_come_from_the_search_index(monkeypatch):
 def test_cc_search_refuses_free_text(monkeypatch):
     import json
 
-    from ai.apps.cablecore import api
+    from ai.apps.cablecore import access, api
     from ai.apps.cablecore.tools import cc_search
     from ai.context import TurnContext
+
+    sent: list[dict] = []
+    user = access.Access(activePlantId='p1', plants=[access.Plant(id='p1', name='1300'), access.Plant(id='p2', name='Demo')],
+                         access={'design': True})
+
+    async def of(_token):
+        return user
 
     async def fake_call(method, path, token, body=None, query=None, **kw):
         if method == 'GET':  # the distinct-designId count
             return 200, {'values': ['LV-1'], 'total': 1}
+        sent.append(body)
         terms = [w for w in body['query'].split() if '=' not in w]
         return 201, {'data': [{'designId': 'LV-1', 'version': 0}], 'pagination': {'total': 1},
                      'parsedQuery': {'filters': [], 'textTerms': terms, 'orGroups': []}}
 
     monkeypatch.setattr(api, 'call', fake_call)
+    monkeypatch.setattr(access, 'of', of)
     ctx = TurnContext(user_id='u', user_email='u@x', cc_token='t', chat_id='c', wait_answer=None)  # type: ignore[arg-type]
     out = json.loads(asyncio.run(cc_search(ctx, 'design', 'PVC conductorType=CU')))
     assert 'refused' in out and 'PVC' in out['refused'] and 'rows' not in out
-    assert 'rows' in json.loads(asyncio.run(cc_search(ctx, 'design', 'conductorType=CU')))
+    found = json.loads(asyncio.run(cc_search(ctx, 'design', 'conductorType=CU')))
+    assert 'rows' in found and found['searched'] == 'plant 1300' and sent[-1]['plant'] == '1300'  # active plant by default
+    assert json.loads(asyncio.run(cc_search(ctx, 'design', 'conductorType=CU', plant='all')))['searched'] == 'all your plants'
+    assert 'plant' not in sent[-1]
+    assert 'no access to plant' in asyncio.run(cc_search(ctx, 'design', 'conductorType=CU', plant='9999'))

@@ -153,6 +153,22 @@ class TicketStore(Protocol):
         ...
 
 
+class MemoryStore(Protocol):
+    """One user's memories and earlier chats (backend-owned; ai/memory.py gives the model its tools)."""
+
+    async def recall(self, user_id: str) -> list[str]:
+        """Every memory of the user, oldest first."""
+        ...
+
+    async def remember(self, user_id: str, chat_id: str, fact: str) -> str:
+        """Keeps a fact; -> what to tell the model (kept, already known, or full)."""
+        ...
+
+    async def search(self, user_id: str, chat_id: str, query: str, limit: int) -> list[dict[str, Any]]:
+        """The user's messages in their other chats matching the query, newest first."""
+        ...
+
+
 def _no_emit(event: Event) -> None:
     pass
 
@@ -169,6 +185,7 @@ class TurnContext:
     # It may return an Answer or a dict; either is validated strictly.
     wait_answer: Callable[[str, Card], Awaitable[Answer | dict[str, Any]]]
     tickets: TicketStore | None = None
+    memory: MemoryStore | None = None
     app_id: str = 'cablecore'
     # Changes the write harness made in this turn, for the after-turn check. Lives and dies with the turn.
     writes: list[WriteRecord] = field(default_factory=lambda: list[WriteRecord]())
@@ -182,10 +199,13 @@ class TurnContext:
         return Answer.model_validate(await self.wait_answer(card_id, card) or {})
 
 
-def user_message(text: str, attachment: tuple[str, str] | None = None, screen: str = '') -> dict[str, Any]:
+def user_message(text: str, attachment: tuple[str, str] | None = None, screen: str = '', document: str = '') -> dict[str, Any]:
     """The user's message as the model sees it. attachment = (file name, sandbox path) of a file the
-    backend uploaded to the sandbox; screen = the DesignCenter page the user is on, so "this design" resolves."""
+    backend uploaded to the sandbox; screen = the DesignCenter page the user is on, so "this design" resolves;
+    document = the attached file's text, so the whole document stays in the conversation's history."""
     if attachment:
         text += f'\n\n[Attached file "{attachment[0]}" is at {attachment[1]}]'
+    if document:
+        text += f'\n\n{document}'
     text += f'\n\n[DesignCenter screen: {screen or "/"}]'
     return {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': text}]}

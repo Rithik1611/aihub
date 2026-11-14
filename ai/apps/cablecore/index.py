@@ -31,6 +31,7 @@ class Route:
     body_schema: dict | None = None
     file_field: str | None = None
     capability: dict | None = None  # the @AiCapability descriptor when the route has one
+    access: dict | None = None  # x-access: what the backend's AccessInterceptor checks (licence, restrictions)
 
 
 _routes: dict[str, Route] = {}
@@ -139,6 +140,7 @@ async def _build(token: str) -> None:
                 body_schema=body,
                 file_field=file_field,
                 capability=cap,
+                access=op.get('x-access'),
             )
             routes[rid] = route
             order.append(rid)

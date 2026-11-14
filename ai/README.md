@@ -36,6 +36,7 @@ The loop itself builds plain dicts; `run_turn` validates each into its model, so
 | `wait_answer(card_id, card: Card) -> Answer` | wait for the user's answer to this card (it also goes out as a `card` event, possibly after this call starts); keep the pending card so a reload can still answer it; on timeout return `Answer()`. The answer is validated strictly: unknown fields are rejected and only the boolean `True` approves |
 | `tickets.issue(user_id, chat_id)` | short-lived (15 min) read ticket for sandbox scripts; the gateway checks it |
 | `history` | the items of earlier turns, exactly as their `items` events gave them |
+| `memory` (optional) | `MemoryStore` for the account: `recall`, `remember`, `search` (earlier chats and their files); gives the model `remember` and `search_chats` |
 
 **Events**, in order: `text.delta`, `tool.start`, `tool.end`, `card`, `check`, then `items` and `done` (always), `error` on failure.
 **Cards**: `approval` (one per cc_action batch, every change listed; answer `{'approved': bool}`) and
@@ -82,6 +83,8 @@ A new app is a new folder in `apps/` exposing `instructions(ctx)`, `tools()` and
 | `CC_INDEX_TTL_S` | `1800` | route index / prompt rebuild interval |
 | `AGENT_REASONING_EFFORT`, `AGENT_MAX_STEPS`, `SUBAGENTS_MAX_CONCURRENT`, `TOOL_RESULT_MAX_CHARS` | medium, 100, 6, 40000 | loop |
 | `CHECK_MODEL` | the chat model | model for the after-turn checks and titles |
+| `AGENT_COMPACT_TOKENS` | `150000` | past this many input tokens in a step, all but the newest 6 tool results are cut to a stub; a context-length error compacts harder and retries once |
+| `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_USE_SSL`, `MINIO_USER_NAME`, `MINIO_PASSWORD`, `MINIO_BUCKET` | —, 9000, false, —, —, `ai-chat-files` | backend: chat uploads in cableCORE's MinIO (same values as cableCORE_BE's app config); empty endpoint = text only |
 | `TOOL_SEARCH` | off | sandbox and web tools hidden until the model finds them with the Responses API tool search |
 | `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` | off | LangSmith tracing of every model call. Sends chat content to LangSmith: use a self-hosted endpoint or clear it first |
 | `LANGFUSE_TRACING`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | off | Langfuse tracing (self-hosted): one trace per chat turn, session = chat, every model call nested under it. Traces contain chat content |
@@ -105,6 +108,22 @@ notes, and one line per skill. Everything else is disclosed when the model asks 
 
 Measure a change with the eval runner plus `evals/scoreboard.py` (steps, tool calls, uncached/cached tokens,
 time, grade per case, read from Langfuse).
+
+## Per-turn context, access, files, memory
+
+- **Access** (`apps/cablecore/access.py`): `GET /auth/access` (cached 60 s) gives the user's active plant, plants,
+  and every licence key and restriction as the backend's AccessInterceptor evaluates them; the OpenAPI `x-access`
+  of each route says what it needs. `cc_find`/`cc_describe` mark routes the user may not call and `cc_action`
+  refuses them before validation or any approval card; `cc_get`/`cc_related`/`cc_formula` gate tables
+  (credentials and chats never; cost, formulas, enquiries, tenders by licence). The API still enforces.
+- **Active plant**: `cc_search`, `cc_related` and `cc_formula` default to the active plant; a named plant or
+  `"all"` overrides; results say which plants were covered.
+- **Per-turn block**: the app's `turn_context(ctx)` (who, plant, what is not licensed / read-only / not
+  permitted) and the user's memories are appended to the user message, never to the cached system prompt.
+- **Files**: uploads go to MinIO and `chat_file` (extracted text, `ai/documents.py`); up to 120k characters the
+  whole document is in the user message, so later turns answer from history without re-reading.
+- **Long chats**: messages older than the replayed window (60) are kept as `chat_session.summary`, refreshed in
+  the background every 10 messages (`backend/app/chat/summary.py`).
 
 ## LangChain
 

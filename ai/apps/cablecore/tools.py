@@ -4,11 +4,12 @@ describe -> action with approval), app notes, and the sandbox's read ticket."""
 import asyncio
 import difflib
 import json
+from collections import Counter
 from typing import Any, Literal
 
 from ai import skills
+from ai.apps.cablecore import access, api, attributes, formula, index, notes, records, related
 from ai.apps.cablecore import actions as harness
-from ai.apps.cablecore import api, attributes, formula, index, notes, records, related
 from ai.apps.cablecore.actions import Action
 from ai.apps.cablecore.prompt import SKILLS, fill
 from ai.context import TurnContext
@@ -20,6 +21,10 @@ def _token(ctx: TurnContext) -> str:
     if not ctx.cc_token:
         raise api.CableCoreError('No cableCORE session for this user; they need to sign in again.')
     return ctx.cc_token
+
+
+async def _access(ctx: TurnContext) -> access.Access | None:
+    return await access.of(_token(ctx))
 
 
 # What a search row is worth showing; the rest are internal ids, timestamps and flags.
@@ -44,6 +49,36 @@ def _within(result: dict[str, Any], rows: list[dict[str, Any]], budget: int) -> 
             return text
         kept = max(0, kept * budget // len(text) - 1)  # shrink in proportion, then re-measure
         result = {**result, 'cut': f'{len(rows) - kept} more rows were read but not shown; narrow the query (add filters).'}
+
+
+TABLE_PAGE = 150  # rows per page of a `fields` search
+BY_VALUE_MAX = 40  # a field with more distinct values than this gets no per-value counts
+
+
+def _table(result: dict[str, Any], rows: list[dict[str, Any]], fields: list[str], page: int) -> str:
+    """Every match of a `fields` search as a compact table: columns once, values shared by every row once
+    (`same_for_all`), counts per value of each field (`by_value`), and pages of TABLE_PAGE rows that fit."""
+    rows = [{k: v for k, v in r.items() if k != 'id'} for r in rows]  # the code identifies a design
+    columns = list(dict.fromkeys(k for r in rows for k in r))
+    same = {c: rows[0].get(c) for c in columns if rows and len({json.dumps(r.get(c), default=str) for r in rows}) == 1}
+    shown = [c for c in columns if c not in same]
+    by_value = {}
+    for f in fields:
+        counts = Counter(str(r.get(f)) for r in rows if r.get(f) not in (None, ''))
+        if 1 < len(counts) <= BY_VALUE_MAX:
+            by_value[f] = dict(counts.most_common())
+    pages = max(1, -(-len(rows) // TABLE_PAGE))
+    page = min(max(page, 1), pages)
+    chunk = [[r.get(c) for c in shown] for r in rows[(page - 1) * TABLE_PAGE: page * TABLE_PAGE]]
+    complete = result.pop('complete', True)
+    out = {**result, **({'same_for_all': same} if same else {}), **({'by_value': by_value} if by_value else {}),
+           'columns': shown, 'page': page, 'pages': pages}
+    while True:
+        text = json.dumps({**out, 'rows': chunk, 'more': page < pages or not complete}, ensure_ascii=False, default=str)
+        if len(text) <= SEARCH_MAX_CHARS or not chunk:
+            return text
+        chunk = chunk[: len(chunk) * 3 // 4]
+        out['cut'] = f'Rows on this page cut to {len(chunk)} to fit; ask for fewer fields or add filters.'
 
 
 def _filter_text(f: dict[str, Any]) -> str | None:
@@ -130,16 +165,27 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     :param query: the search in the query language above
     :param page: result page (1-based)
     :param page_size: rows per page, max 20
-    :param plant: only when the user names a plant; empty searches every plant they can access
+    :param plant: empty = the user's active plant (the default for every question); a plant name when the user
+        names one; "all" when they ask across all their plants. The answer says which plants were searched.
     :param fields: designs only: attribute values to add to every row, as keys (plant.voltage, plant.conductorCSA,
-        INSULATING_MV.nomThickness). With fields and at most 300 matches, all pages are read, so one call lists
-        every match with the values to compare.
+        INSULATING_MV.nomThickness). With fields and at most 300 matches, every match comes back in one table:
+        `columns` + `rows`, values common to all rows in `same_for_all`, and counts per value in `by_value`
+        (answer "how many of each" from it; no need to search value by value). `pages` > 1: ask for page=2...
     :return: designs (distinct), parsedQuery and compact rows (code, id, plant, status, and the fields asked for)
     """
     token = _token(ctx)
     path = {'design': '/os/designs/search', 'enquiry': '/os/enquiries/search'}.get(kind)
     if not path:
         return 'kind must be design or enquiry; for anything else use cc_find.'
+    scope = 'every plant you can access'
+    if allowed := await _access(ctx):
+        if not allowed.allows(kind, 'core'):
+            return access.NO_LICENCE
+        try:
+            plant = access.plant_name(allowed, plant)
+        except ValueError as e:
+            return str(e)
+        scope = f'plant {plant}' if plant else 'all your plants'
     body = {'query': query, 'page': page, 'pageSize': min(max(page_size, 1), 20), **({'plant': plant} if plant else {})}
     status, data = await api.call('POST', path, token, body=body)
     if error := api.failed(status, data):
@@ -153,9 +199,9 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
                            'customerName="…" for customers; description like %…% only for a property with no attribute.',
                            'parsedQuery': parsed}, ensure_ascii=False)
     if total == 0:
-        return json.dumps({'total': 0, 'parsedQuery': parsed, 'why': await _why_empty(path, token, body, parsed, kind)}, ensure_ascii=False)
+        return json.dumps({'total': 0, 'searched': scope, 'parsedQuery': parsed, 'why': await _why_empty(path, token, body, parsed, kind)}, ensure_ascii=False)
     if kind != 'design':
-        result: dict[str, Any] = {'total': total, 'parsedQuery': parsed, 'page': page,
+        result: dict[str, Any] = {'total': total, 'searched': scope, 'parsedQuery': parsed, 'page': page,
                                   'more': isinstance(total, int) and total > (page - 1) * body['pageSize'] + len(rows)}
         return _within(result, [_compact_row(kind, r) for r in rows], SEARCH_MAX_CHARS)
     # Designs: the index holds every version of a design, so rows are read in bulk, de-duplicated to the latest
@@ -163,7 +209,7 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     rows, complete = await _design_rows(path, token, body, rows, total)
     unique = _latest_versions(rows)
     designs = len(unique) if complete else await _distinct_designs(token, query, plant)
-    result = {'designs': designs, 'rows_in_index': total, 'parsedQuery': parsed}
+    result = {'designs': designs, 'searched': scope, 'rows_in_index': total, 'parsedQuery': parsed}
     if note := await _null_note(parsed):
         result['note'] = note
     if fields:
@@ -175,8 +221,8 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
         for r in unique:
             ref = next((str(r[k]) for k in ('designId', 'id') if r.get(k) and str(r[k]) in values), None)
             r.update(values[ref] if ref else {})
-        result['more'] = not complete
-        return _within(result, [{**_compact_row(kind, r), **{f: r.get(n) for f, n in wanted.items()}} for r in unique], SEARCH_MAX_CHARS)
+        rows = [{**_compact_row(kind, r), **{f: r.get(n) for f, n in wanted.items()}} for r in unique]
+        return _table({**result, 'complete': complete}, rows, list(wanted), page)
     size = body['pageSize']
     shown = unique[(page - 1) * size: page * size]
     result.update(page=page, more=len(unique) > page * size or not complete)
@@ -234,10 +280,9 @@ def _version(row: dict[str, Any]) -> float:
 
 
 async def _distinct_designs(token: str, query: str, plant: str) -> int | None:
-    """Distinct design codes matching the query, from the index (all plants; None when unavailable)."""
-    if plant:
-        return None
-    status, data = await api.call('GET', '/os/designs/distinct/designId', token, query={'q': query, 'size': 10000})
+    """Distinct design codes matching the query, from the index (None when unavailable)."""
+    status, data = await api.call('GET', '/os/designs/distinct/designId', token,
+                                  query={'q': query, 'size': 10000, **({'plants': plant} if plant else {})})
     return None if api.failed(status, data) else (data or {}).get('total')
 
 async def cc_attributes(ctx: TurnContext, words: list[str], process: str = '') -> str:
@@ -248,6 +293,9 @@ async def cc_attributes(ctx: TurnContext, words: list[str], process: str = '') -
     the most common stored values. Give the words the app may use and your own synonyms: a property can be
     named differently from everyday terms (cores may be "elements" of a lay-up process). An attribute that lives
     in several places holds the same property for different product classes or plants: search each real key.
+    A key flagged `warning` holds a template default on most designs: do not filter on it for a real property.
+    Filter with the stored value form shown in `common_values` (CU not copper, 0.6/1 not 0.6/1 kV, 95 not 95 mm²).
+    One call per property; call them all in the same step.
 
     :param words: words for the property, e.g. ["core", "element"], ["sheath", "jacket"], ["voltage"]
     :param process: only keys of this process, e.g. LAYUP
@@ -270,10 +318,14 @@ async def cc_get(ctx: TurnContext, kind: Literal['design', 'enquiry', 'catalogue
     :param process: designs only: just this process's values (e.g. INSULATION), for a design too big to show whole
     :return: the record as JSON
     """
-    _token(ctx)  # a chat without a cableCORE session gets no data
+    allowed = await _access(ctx)
+    if allowed and not allowed.allows('enquiry' if kind == 'enquiry' else 'design', 'core'):
+        return access.NO_LICENCE
     record = await records.get(kind, ref)
     if not record:
         return f'No {kind} matches {ref!r}. Search with cc_search.'
+    if allowed and record.get('plant') and not allowed.plant(str(record['plant'])):
+        return access.NOT_YOUR_PLANT.format(plant=record['plant'])
     if process:
         processes = record.get('processes') or []
         chosen = [p for p in processes if str(p.get('process', '')).lower() == process.lower()]
@@ -284,12 +336,13 @@ async def cc_get(ctx: TurnContext, kind: Literal['design', 'enquiry', 'catalogue
     return records.clip(record)
 
 async def cc_related(ctx: TurnContext, table: str, record: str = '', where: dict[str, Any] | None = None, columns: list[str] | None = None, order_by: str = '',
-                     limit: int = 100, offset: int = 0, via: str = '') -> str:
+                     limit: int = 100, offset: int = 0, via: str = '', plant: str = '') -> str:
     """
     Rows of any table (the Prisma model names in the data map), all of them or only those linked to one
     record through the schema's foreign keys, with the total count. One call for things like a design's
     change history, cost roll-up, carbon breakdown or current rating calculations; an enquiry's lines; a
-    customer's enquiries or quotations; tenders; design requests; lookup tables. Read-only, across plants.
+    customer's enquiries or quotations; tenders; design requests; lookup tables. Read-only. Tables with a plant
+    are read for the user's active plant unless `plant` says otherwise; tables their licence does not cover are refused.
     Examples:
       table=DesignHistory, record=LV-7035, where={"createdAt": {"op": ">=", "value": "2026-01-01"}}
       table=CostingVersionRollupBreakdown, record=LV-7035, via=parentDesignId,
@@ -307,11 +360,17 @@ async def cc_related(ctx: TurnContext, table: str, record: str = '', where: dict
     :param limit: rows to return, max 500
     :param offset: rows to skip, for the next page
     :param via: which foreign key links the table to the record, when there are several
+    :param plant: empty = the active plant; a plant name the user names; "all" for all their plants
     :return: total, more, and the rows
     """
-    _token(ctx)
+    allowed = await _access(ctx)
     try:
-        result = await related.rows(table, record, where, columns, order_by, limit, offset, via)
+        plants = None
+        if allowed:
+            if why := access.table_refusal(allowed, related.model_name(table)):
+                return why
+            plants = access.plant_ids(allowed, plant)
+        result = await related.rows(table, record, where, columns, order_by, limit, offset, via, plants)
         text = await asyncio.to_thread(json.dumps, result, ensure_ascii=False, default=str)  # off the event loop
     except ValueError as e:
         return str(e)
@@ -329,15 +388,19 @@ async def cc_formula(ctx: TurnContext, attribute: str, process: str = '', design
     :param attribute: attribute name, e.g. nomThickness, noWires
     :param process: the process for a process attribute (e.g. SHEATHING); empty for a plant (header) attribute
     :param design: optional design code; its plant, classification and linked formula are used
-    :param plant: plant name when no design is given
+    :param plant: plant name when no design is given; empty = the user's active plant
     :param classification: product classification name when no design is given
     :param focus: optional text, e.g. a standard's name: long formulas are cut to the branches mentioning it
     :param tables: lookup table names to return in full (others come back as name, rows and columns)
     :param depth: how many levels of dependencies to follow (1-3)
     :return: the formula, its dependencies' formulas, and the lookup tables
     """
-    _token(ctx)
+    allowed = await _access(ctx)
+    if allowed and not allowed.permits('readDesignFormula'):
+        return access.NO_PERMISSION
     try:
+        if allowed and not design:
+            plant = access.plant_name(allowed, plant) or plant
         result = await formula.trace_async(attribute, process, design, plant, classification, depth, focus, tables or [])
     except ValueError as e:
         return str(e)
@@ -356,7 +419,10 @@ async def cc_find(ctx: TurnContext, query: str, limit: int = 6, writes_only: boo
     """
     await index.ensure(_token(ctx))
     routes = index.find(query, min(max(limit, 1), 12), writes_only)
-    return '\n'.join(index.line(r) for r in routes) or f'No route matches {query!r}; try other words.'
+    allowed = await _access(ctx)
+    lines = [index.line(r) + (f' | NOT ALLOWED for this user: {why}' if allowed and (why := access.route_refusal(allowed, r.method, r.access)) else '')
+             for r in routes]
+    return '\n'.join(lines) or f'No route matches {query!r}; try other words.'
 
 async def cc_describe(ctx: TurnContext, id: str) -> str:
     """
@@ -371,6 +437,9 @@ async def cc_describe(ctx: TurnContext, id: str) -> str:
     route = index.get(id)
     if not route:
         return f'No route {id!r}. Closest: ' + '; '.join(r.id for r in index.find(id.replace('_', ' ').replace('.', ' '), 4))
+    allowed = await _access(ctx)
+    if allowed and (why := access.route_refusal(allowed, route.method, route.access)):
+        return f'NOT ALLOWED for this user: {why} Tell the user; do not look for another route to the same result.'
     return index.describe(route)
 
 async def cc_action(ctx: TurnContext, actions: list[Action], verify: list[str] | None = None) -> str:

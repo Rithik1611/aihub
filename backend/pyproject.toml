@@ -13,6 +13,7 @@ dependencies = [
     "httpx==0.28.1",
     "python-multipart==0.0.20",  # form uploads on /chat/stream and /chat/send-with-file
     "aihub-ai",  # the agent core, ../ai (workspace member; docs/adr/0009)
+    "minio>=7.2",
 ]
 
 [tool.uv.sources]

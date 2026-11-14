@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat import agent
+from app.chat import agent, files
 from app.chat.repository import ChatRepository
 from app.chat.schemas import (
     MAX_MESSAGE_LENGTH,
@@ -155,7 +155,9 @@ async def send_message(
     approval or an answer, the reply carries it as `questions` and the next message answers it."""
     _require_default(body.mode)
     return await _final(
-        _turn_events(request, caller, repo, settings, body.message, body.session_id, body.new_session_id, "", None)
+        _turn_events(
+            request, caller, repo, settings, body.message, body.session_id, body.new_session_id, body.page, None
+        )
     )
 
 
@@ -298,6 +300,9 @@ async def get_session_messages(
 @router.delete("/sessions/{session_id}", response_model=ApiResponse[None])
 async def delete_session(session_id: SessionId, caller: ThrottledCaller, repo: Repository) -> ApiResponse[None]:
     account_id = caller.account_id
+    if not await repo.is_session_owned(session_id, account_id):
+        raise _SESSION_NOT_FOUND
+    await files.remove_session_files(session_id)  # before the rows go with the session
     if await repo.delete_owned_session(session_id, account_id) == 0:
         raise _SESSION_NOT_FOUND
     await repo.clear_last_active_session(account_id, session_id)

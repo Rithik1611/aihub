@@ -1,5 +1,6 @@
-"""cableCORE DesignCenter app pack. What the loop takes from an app: instructions, tools, after_turn.
+"""cableCORE DesignCenter app pack. What the loop takes from an app: instructions, tools, after_turn, turn_context.
 
+access   what the user's licence and restrictions allow (GET /auth/access), checked before any call or read.
 api      HTTP calls to cableCORE with the user's own JWT; the OpenAPI document and AI capabilities.
 index    every route (1.5k) searchable by intent; schemas and risk per route; read-only check for the sandbox gateway.
 records  read-back of designs and enquiries from the read-only database.
@@ -10,8 +11,9 @@ notes    facts verified in chats, added to every later chat.
 tools    the model's cableCORE tools.  prompt  the system prompt.  hooks  the after-turn checks.
 """
 
+from ai.apps.cablecore.access import turn_context
 from ai.apps.cablecore.hooks import after_turn
 from ai.apps.cablecore.prompt import instructions
 from ai.apps.cablecore.tools import tools
 
-__all__ = ['after_turn', 'instructions', 'tools']
+__all__ = ['after_turn', 'instructions', 'tools', 'turn_context']

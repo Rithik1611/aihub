@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from ai import sandbox
-from ai.apps.cablecore import api, index, records
+from ai.apps.cablecore import access, api, index, records
 from ai.context import ApprovalCard, ApprovalItem, TurnContext, WriteRecord
 
 
@@ -144,6 +144,8 @@ async def run(actions: list[Action] | list[dict[str, Any]], verify: list[str] | 
 
     planned: list[tuple[index.Route, dict[str, Any], dict[str, Any], Any, str | None]] = []
     problems: list[str] = []
+    refused: list[str] = []
+    allowed = await access.of(token)
     for n, raw in enumerate(actions or [], 1):
         action = raw if isinstance(raw, Action) else Action.model_validate(raw)
         rid = action.id
@@ -151,6 +153,9 @@ async def run(actions: list[Action] | list[dict[str, Any]], verify: list[str] | 
         if not route:
             near = '; '.join(r.id for r in index.find(rid.replace('_', ' ').replace('.', ' '), 3))
             problems.append(f'action {n}: no route {rid!r}. Closest: {near}. Use cc_find.')
+            continue
+        if allowed and (why := access.route_refusal(allowed, route.method, route.access)):
+            refused.append(f'action {n} ({rid}): {why}')
             continue
         path, query, body = action.path or {}, action.query or {}, action.body
         errors = index.validate(route, path, query, body)
@@ -160,6 +165,10 @@ async def run(actions: list[Action] | list[dict[str, Any]], verify: list[str] | 
             errors.append(f"file: this route needs file=<sandbox path> (field '{route.file_field}')")
         problems += [f'action {n} ({rid}): {e}' for e in errors]
         planned.append((route, path, query, body, action.file))
+    if refused:  # the API would refuse these: say so, never look for another route to the same result
+        return json.dumps({'status': 'not allowed', 'nothing_ran': True, 'refused': refused,
+                           'tell_user': 'Their licence or restrictions on the active plant do not allow this; '
+                                        'an administrator can change them.'}, ensure_ascii=False)
     if problems:
         return json.dumps({'status': 'invalid', 'nothing_ran': True, 'problems': problems}, ensure_ascii=False)
 

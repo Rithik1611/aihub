@@ -161,15 +161,28 @@ def _plain(value: Any) -> Any:
     return value
 
 
+def model_name(table: str) -> str:
+    """The Prisma model a table name stands for (raises ValueError for an unknown one)."""
+    return _model(table).name
+
+
 async def rows(table: str, record: str = '', where: dict | None = None, columns: list[str] | None = None,
-               order_by: str = '', limit: int = 100, offset: int = 0, via: str = '') -> dict:
+               order_by: str = '', limit: int = 100, offset: int = 0, via: str = '',
+               plants: tuple[list[str], str] | None = None) -> dict:
+    """plants = (plant ids, how to say it): rows of a table with a plantId are limited to them, unless the read is
+    tied to one record (the record decides)."""
     target = _model(table)
     conds, params, joins = [], [], {}
     link = ''
+    scope = None
     if record:
         cond, link_params, link = _link(target, await _record_ids(record), via)
         conds.append(cond)
         params += link_params
+    elif plants and 'plantId' in target.columns and 'plantId' not in (where or {}):
+        conds.append(f't.{_q(target.columns["plantId"])}::text = any(%s)')
+        params.append(plants[0])
+        scope = plants[1]
     for name, spec in (where or {}).items():
         op, value = (spec.get('op', '='), spec.get('value')) if isinstance(spec, dict) else ('=', spec)
         op = str(op).lower()
@@ -201,7 +214,7 @@ async def rows(table: str, record: str = '', where: dict | None = None, columns:
     limit = min(max(int(limit), 1), MAX_LIMIT)
     total = (await asyncio.to_thread(records._rows, f'select count(*) as n {base}', tuple(params)))[0]['n']
     found = await asyncio.to_thread(records._rows, f'select {", ".join(select)} {base}{order} limit {limit} offset {int(offset)}', tuple(params))
-    result = {'table': target.name, 'linked_by': link or None, 'total': total, 'offset': offset}
+    result = {'table': target.name, 'linked_by': link or None, **({'plants': scope} if scope else {}), 'total': total, 'offset': offset}
     return await asyncio.to_thread(_fit, result, found)  # CPU work stays off the event loop
 
 

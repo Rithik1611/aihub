@@ -11,13 +11,18 @@ import os
 from dataclasses import replace
 from typing import AsyncIterator
 
-from ai import apps, ask_user, http, sandbox, web
+from ai import apps, ask_user, http, memory, sandbox, web
 from ai.context import Event, TurnContext
 from ai.tools import Tool, run, tool
 
 MAX_STEPS = int(os.getenv('AGENT_MAX_STEPS', '100'))
 REASONING_EFFORT = os.getenv('AGENT_REASONING_EFFORT', 'medium')
 SUBAGENTS_MAX_CONCURRENT = int(os.getenv('SUBAGENTS_MAX_CONCURRENT', '6'))
+# Past this many input tokens in one step, older tool results are cut to a stub (the model keeps the call and
+# the result's start; the newest KEEP_OUTPUTS results stay whole). A context-length error compacts harder, once.
+COMPACT_AT_TOKENS = int(os.getenv('AGENT_COMPACT_TOKENS', '150000'))
+KEEP_OUTPUTS = 6
+STUB = '[earlier result shortened to save context; call the tool again if you need it whole:'
 SUBAGENT_PROMPT = """You are a sub-agent working on a specific task assigned by the lead agent.
 
 You have full access to the workspace — you can read, write, edit files, and run commands.
@@ -42,6 +47,22 @@ _subagents = asyncio.Semaphore(SUBAGENTS_MAX_CONCURRENT)
 def _input_item(item: dict) -> dict:
     allowed = _INPUT_FIELDS.get(item.get('type', ''))
     return {k: v for k, v in item.items() if k in allowed} if allowed else item
+
+
+def compact(items: list[dict], keep: int = KEEP_OUTPUTS) -> int:
+    """Cuts all but the newest `keep` tool results to a stub, in place; -> how many were cut."""
+    outputs = [i for i in items if i.get('type') == 'function_call_output' and isinstance(i.get('output'), str)]
+    cut = 0
+    for item in outputs[:len(outputs) - keep] if keep else outputs:
+        if len(item['output']) > 400 and not item['output'].startswith(STUB):
+            item['output'] = f"{STUB} {item['output'][:300]} …]"
+            cut += 1
+    return cut
+
+
+def _too_long(error: Exception) -> bool:
+    text = str(error).lower()
+    return 'context' in text and ('length' in text or 'window' in text or 'too long' in text or 'exceed' in text)
 
 
 def text_of(items: list[dict]) -> str:
@@ -70,12 +91,19 @@ async def agent(ctx: TurnContext, instructions: str, items: list[dict], tools: d
                 usage: dict[str, int], stream_text: bool = True) -> AsyncIterator[Event]:
     """Runs model steps until the model answers without tool calls. New output is appended to `items`."""
     specs = [t.spec() for t in tools.values()]
+    retried = False
     for _ in range(MAX_STEPS):
         response = None
-        stream = await http.llm().responses.create(
-            model=http.model(), instructions=instructions, input=[_input_item(i) for i in items], tools=specs,
-            reasoning={'effort': REASONING_EFFORT}, store=False, include=['reasoning.encrypted_content'], stream=True,
-        )
+        try:
+            stream = await http.llm().responses.create(
+                model=http.model(), instructions=instructions, input=[_input_item(i) for i in items], tools=specs,
+                reasoning={'effort': REASONING_EFFORT}, store=False, include=['reasoning.encrypted_content'], stream=True,
+            )
+        except Exception as e:  # noqa: BLE001 - only a context overflow is handled; anything else re-raises
+            if retried or not _too_long(e) or not compact(items, keep=2):
+                raise
+            retried = True
+            continue
         async for event in stream:
             if event.type == 'response.output_text.delta' and stream_text:
                 yield {'type': 'text.delta', 'text': event.delta}
@@ -88,6 +116,8 @@ async def agent(ctx: TurnContext, instructions: str, items: list[dict], tools: d
         if response.usage:
             usage['input_tokens'] = usage.get('input_tokens', 0) + response.usage.input_tokens
             usage['output_tokens'] = usage.get('output_tokens', 0) + response.usage.output_tokens
+            if response.usage.input_tokens > COMPACT_AT_TOKENS:
+                compact(items)
         output = [o.model_dump(exclude_none=True) for o in response.output]
         items += output
         calls = [o for o in output if o['type'] == 'function_call']
@@ -148,7 +178,7 @@ def _delegate_tool(instructions: str, tools: dict[str, Tool], usage: dict[str, i
 
 async def turn_tools(ctx: TurnContext, instructions: str, usage: dict[str, int]) -> dict[str, Tool]:
     pack = apps.get(ctx.app_id)
-    tools = [*pack.tools(), ask_user.TOOL, *web.TOOLS, *await sandbox.tools(ctx)]
+    tools = [*pack.tools(), ask_user.TOOL, *memory.tools(ctx), *web.TOOLS, *await sandbox.tools(ctx)]
     by_name = {t.name: t for t in tools}
     by_name['delegate_task'] = _delegate_tool(instructions, by_name, usage)
     return by_name
