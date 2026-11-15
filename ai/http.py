@@ -1,7 +1,8 @@
 """Shared clients: one aiohttp session per event loop, one model client (Azure OpenAI, Responses API).
 
 With LANGSMITH_TRACING=true the model client is wrapped by LangSmith, so every loop step (prompt, tool
-calls, tokens, latency) is traced without touching the loop. Off by default: traces contain chat content.
+calls, tokens, latency) is traced without touching the loop. LANGFUSE_TRACING=true does the same with
+Langfuse (self-hosted). Off by default: traces contain chat content.
 """
 
 import asyncio
@@ -32,6 +33,10 @@ def llm() -> AsyncOpenAI:
     if _llm is None:
         s = settings()
         client = AsyncOpenAI(base_url=s.luna_base_url, api_key=s.luna_api_key.get_secret_value())
+        if s.langfuse_tracing:
+            # Patches the openai SDK itself: every responses.create/parse is traced, ours and the
+            # LangChain ChatOpenAI's (checks, titles), so no LangChain callback is needed.
+            import langfuse.openai  # noqa: F401  # pyright: ignore[reportUnusedImport]
         if s.langsmith_tracing:
             from langsmith.wrappers import wrap_openai
 

@@ -92,6 +92,12 @@ class ChatRepository:
         rows.reverse()
         return rows
 
+    async def get_session_summary(self, session_id: uuid.UUID, account_id: uuid.UUID) -> str | None:
+        """The rolling summary of the session's older messages (app.chat.summary), if any."""
+        return await self._db.scalar(
+            select(ChatSession.summary).where(ChatSession.id == session_id, ChatSession.account_id == account_id)
+        )
+
     async def find_latest_session_id(self, account_id: uuid.UUID) -> uuid.UUID | None:
         stmt = (
             select(ChatSession.id)

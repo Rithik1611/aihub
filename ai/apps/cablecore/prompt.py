@@ -1,18 +1,27 @@
-"""The system prompt: prompt.md with the schema file index, the data map (foreign keys of the models users
-ask about most) and the action catalogue (@AiCapability routes), plus per-turn values and the app notes."""
+"""The system prompt: prompt.md (the core: role, tools, rules, key facts), the app notes and the skills index.
+
+Generated knowledge - the action catalogue (@AiCapability routes), the data map (foreign keys of the models users
+ask about most) and the schema file index - lives in skills (skills/), loaded only when the model asks for it.
+`fill` puts the generated parts into a skill's text when it is loaded.
+"""
 
 import re
 import time
+from pathlib import Path
 
+from ai import skills as skill_lib
 from ai.apps.cablecore import api, notes
 from ai.apps.cablecore.related import SCHEMA_DIR
 from ai.context import TurnContext
-from pathlib import Path
+from ai.settings import settings
 
 PROMPT_FILE = Path(__file__).parent / 'prompt.md'
+SKILLS = skill_lib.discover(skill_lib.CORE_DIR, Path(__file__).parent / 'skills')
 REBUILD_S = 1800  # same as the route index: new backend actions show up without a restart
+TOOL_SEARCH_NOTE = ('- Sandbox and web tools are not listed until you need them: tool search finds and loads them '
+                    '(e.g. run_command, read_file, write_file, search_web, fetch_url, cablecore_api_access).\n')
 
-# The models users ask about most; their foreign keys are listed in the prompt, read from the schema.
+# The models users ask about most; their foreign keys are in the data-model skill, read from the schema.
 MAP_MODELS = [
     'Design', 'Config', 'DesignVersion', 'PlantAttribute', 'PlantAttributeValue', 'CableHeaderAttributeValue',
     'ProcessDesign', 'ProcessAttribute', 'ProcessAttributeValue', 'BOMItem', 'DesignStatusFlow', 'WorkflowState',
@@ -22,7 +31,7 @@ MAP_MODELS = [
     'Tender', 'TenderSpec', 'TenderLineItem',
 ]
 
-_base: tuple[float, str] = (0.0, '')
+_generated: tuple[float, dict[str, str]] = (0.0, {})
 
 
 def schema_index() -> str:
@@ -73,20 +82,26 @@ def catalogue(spec: dict) -> str:
     return '\n'.join(sorted(lines))
 
 
-async def _base_prompt(token: str) -> str:
-    global _base
-    if time.time() - _base[0] > REBUILD_S:
+async def _generated_parts(token: str) -> dict[str, str]:
+    global _generated
+    if time.time() - _generated[0] > REBUILD_S:
         spec = await api.spec(token)
-        text = (PROMPT_FILE.read_text(encoding='utf-8')
-                .replace('{{SCHEMA_INDEX}}', schema_index())
-                .replace('{{DATA_MAP}}', data_map())
-                .replace('{{CATALOGUE}}', catalogue(spec)))
-        _base = (time.time(), text)
-    return _base[1]
+        _generated = (time.time(), {'{{SCHEMA_INDEX}}': schema_index(), '{{DATA_MAP}}': data_map(), '{{CATALOGUE}}': catalogue(spec)})
+    return _generated[1]
+
+
+async def fill(text: str, ctx: TurnContext) -> str:
+    """A prompt or skill text with its placeholders filled for this user and turn."""
+    if '{{SCHEMA_INDEX}}' in text or '{{DATA_MAP}}' in text or '{{CATALOGUE}}' in text:
+        for key, value in (await _generated_parts(ctx.cc_token)).items():
+            text = text.replace(key, value)
+    return text.replace('{{USER_EMAIL}}', ctx.user_email).replace('{{CURRENT_DATE}}', time.strftime('%Y-%m-%d'))
 
 
 async def instructions(ctx: TurnContext) -> str:
-    text = (await _base_prompt(ctx.cc_token)).replace('{{USER_EMAIL}}', ctx.user_email).replace('{{CURRENT_DATE}}', time.strftime('%Y-%m-%d'))
+    text = PROMPT_FILE.read_text(encoding='utf-8')
+    text = text.replace('{{SKILLS}}', skill_lib.index(SKILLS)).replace('{{TOOL_SEARCH}}', TOOL_SEARCH_NOTE if settings().tool_search else '')
+    text = await fill(text, ctx)
     app_notes = notes.for_prompt()
     if app_notes:
         text = '# App notes (facts verified in earlier chats)\n' + app_notes + '\n\n' + text

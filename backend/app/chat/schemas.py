@@ -142,6 +142,8 @@ class SendMessage(_Request):
     # stops waiting before the reply arrives.
     new_session_id: uuid.UUID | None = None
     mode: ChatMode = ChatMode.DEFAULT
+    # The DesignCenter page the user is on (path and query), so "this design" resolves.
+    page: Annotated[str, Field(max_length=500)] = ""
 
 
 class UpdateSessionName(_Request):

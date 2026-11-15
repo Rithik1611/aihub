@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     chat_rate_limit: int = Field(default=60, ge=1)
     chat_rate_window_seconds: int = Field(default=60, ge=1)
 
+    # Object storage for chat uploads: the MinIO cableCORE_BE uses (same MINIO_* names as its app config).
+    # Empty endpoint = uploads are kept only in the sandbox and as extracted text.
+    minio_endpoint: str = ""
+    minio_port: int = 9000
+    minio_use_ssl: bool = False
+    minio_user_name: str = ""
+    minio_password: SecretStr = SecretStr("")
+    minio_bucket: str = "ai-chat-files"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _read_origins(cls, value: object) -> object:

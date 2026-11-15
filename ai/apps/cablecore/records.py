@@ -14,7 +14,7 @@ from psycopg.rows import dict_row
 
 from ai.settings import settings
 
-_UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+_UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
 MAX_CHARS = 9000
 
 
@@ -225,6 +225,33 @@ def values_for(codes: list[str], fields: list[str]) -> dict[str, dict]:
     return out
 
 
+def design_count() -> int:
+    """Designs that are not archived (the population searches run over)."""
+    return int(_rows('select count(*) as n from "Design" where not "isArchived"')[0]['n'])
+
+
+def designs_with_attribute(key: str) -> int:
+    """Distinct non-archived designs with a non-empty value for a design-level (name) or process (PROCESS.name) attribute."""
+    base = ('join "DesignVersion" dv on dv.id = v."designId" join "Config" c on c.id = dv."configId" '
+            'join "Design" d on d.id = c."designId" where not d."isArchived" and ')
+    if '.' in key:
+        process, name = key.split('.', 1)
+        sql = ('select count(distinct d.id) as n from "ProcessAttributeValue" v join "ProcessAttribute" a on a.id = v."processAttributeId" '
+               'join "Process" pr on pr.id = a."processId" ' + base + 'pr.name = %s and a.name = %s and ' + _NON_EMPTY)
+        params: tuple[str, ...] = (process, name)
+    else:
+        sql = ('select count(distinct d.id) as n from "PlantAttributeValue" v join "PlantAttribute" a on a.id = v."plantAttributeId" '
+               + base + 'a.name = %s and ' + _NON_EMPTY)
+        params = (key,)
+    return int(_rows(sql, params)[0]['n'])
+
+
+_NON_EMPTY = (
+    "(coalesce(v.\"valueString\", '') <> '' or v.\"valueDecimal\" is not null or v.\"valueBoolean\" is not null "
+    "or v.\"valueDateTime\" is not null or coalesce(v.\"valueDropdown\", '') not in ('', '{\"valueDropdown\":\"\"}'))"
+)
+
+
 async def get(kind: str, ref: str) -> dict | None:
     loader = {'design': _design, 'enquiry': _enquiry, 'catalogue': _catalogue}.get(kind)
     if not loader:
@@ -264,9 +291,7 @@ def ids_in(value: Any, limit: int = 6) -> list[str]:
             for v in node[:20]:
                 walk(v, key)
         elif isinstance(node, str):
-            if _UUID.match(node) and key.lower() in ('id', 'designid', 'designversionid', 'versionid', 'newdesignid', 'enquiryid', 'enquiryversionid', 'design_id', 'version_id', 'catalogueid', 'catalogue_id'):
-                found.append(node)
-            elif re.match(r'^(ENG-)?[A-Z]{2,4}-\d{3,6}$|^ENQ-\d{3,6}$', node):
+            if _UUID.match(node) and key.lower() in ('id', 'designid', 'designversionid', 'versionid', 'newdesignid', 'enquiryid', 'enquiryversionid', 'design_id', 'version_id', 'catalogueid', 'catalogue_id') or re.match(r'^(ENG-)?[A-Z]{2,4}-\d{3,6}$|^ENQ-\d{3,6}$', node):
                 found.append(node)
 
     walk(value)

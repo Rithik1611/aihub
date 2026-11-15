@@ -103,7 +103,8 @@ def _make(method: str, path: str, op: dict, components: dict, cwd: str) -> Tool:
             text = await r.text(errors='replace')
             return json.dumps({'error': f'{r.status}: {text[:2000]}'}) if r.status >= 400 else text
 
-    return Tool(op['operationId'], description, {'type': 'object', 'properties': properties, 'required': required}, call)
+    return Tool(op['operationId'], description, {'type': 'object', 'properties': properties, 'required': required}, call,
+                defer=True)  # found by tool search when it is on
 
 
 async def tools(ctx: TurnContext) -> list[Tool]:

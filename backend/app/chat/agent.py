@@ -17,7 +17,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -25,6 +25,7 @@ import ai
 from ai import sandbox
 from ai.context import ApprovalCard, Card, CardEvent, Check, Error, Items, TextDelta, ToolEnd, ToolStart, TurnContext
 
+from app.chat import files, memory, summary
 from app.chat.models import ChatMessage
 from app.chat.repository import ChatRepository
 from app.chat.schemas import ChatMessageMetadata, ChatQuestion, ChatReply, ChatSender, ChatTask, TaskStatus
@@ -60,6 +61,13 @@ class Turn:
 
 
 _turns: dict[uuid.UUID, Turn] = {}
+_tasks: set["asyncio.Task[None]"] = set()  # background work, referenced until done
+
+
+def _background(work: "Coroutine[Any, Any, None]") -> None:
+    task = asyncio.create_task(work)
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
 
 
 def running_tasks(session_id: uuid.UUID) -> list[ChatTask]:
@@ -104,8 +112,15 @@ def history_items(messages: list[ChatMessage]) -> list[dict[str, Any]]:
     return out
 
 
+def _storable(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Without NUL characters, which Postgres cannot store in text or JSONB (a tool may have read binary data)."""
+    text = json.dumps(items, default=str)
+    return items if "\\u0000" not in text else json.loads(text.replace("\\u0000", ""))
+
+
 def _bounded(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keeps a stored turn under ITEMS_MAX_BYTES: long tool results are cut first, then tool calls go."""
+    items = _storable(items)
     if len(json.dumps(items, default=str)) <= ITEMS_MAX_BYTES:
         return items
     cut = [
@@ -195,7 +210,11 @@ async def _store_ai(
             complete=None if questions else True,
         )
         message = await repo.create_message(
-            turn.session_id, ChatSender.AI, content or "Sorry, I could not generate a response.", metadata, agent_items
+            turn.session_id,
+            ChatSender.AI,
+            (content or "Sorry, I could not generate a response.").replace("\x00", ""),
+            metadata,
+            agent_items,
         )
         await repo.set_session_suggestions(turn.session_id, turn.account_id, [])
         if agent_items is not None and turn.new_session:
@@ -263,6 +282,7 @@ async def _run(turn: Turn, ctx: TurnContext, history: list[dict[str, Any]], mess
             turn, turn.text.strip(), None, None, {"covered": turn.covered, "items": _bounded(items)}
         )
         put({"type": "finished", "reply": reply})
+        _background(summary.refresh(turn.session_id, HISTORY_MESSAGES))
     except Exception:
         logger.exception("agent turn crashed in session %s", turn.session_id)
         put({"type": "failed"})
@@ -287,6 +307,7 @@ def _context(turn: Turn, caller_token: str, username: str, tickets: Any) -> Turn
         chat_id=str(turn.session_id),
         wait_answer=wait_answer,
         tickets=tickets,
+        memory=memory.Store(turn.account_id),
     )
 
 
@@ -313,6 +334,7 @@ async def respond(
         history = (
             None if turn else await repo.find_owned_session_recent_messages(session_id, account_id, HISTORY_MESSAGES)
         )
+        earlier = None if turn else await repo.get_session_summary(session_id, account_id)
         meta = (
             ChatMessageMetadata.model_validate({"attachment": {"name": attachment[0], "size": len(attachment[1])}})
             if attachment
@@ -335,13 +357,19 @@ async def respond(
         turn.answer.set_result(answer_for(turn.card, message))
     else:
         turn = Turn(session_id, account_id, new_session, message, covered=[str(human.id)])
-        path = None
+        path, document = None, ""
         if attachment:
-            path = await sandbox.save_file(attachment[0], attachment[1], attachment[2], folder="uploads")
-        user_item = ai.user_message(message, (attachment[0], path) if attachment and path else None, page)
+            try:
+                path = await sandbox.save_file(attachment[0], attachment[1], attachment[2], folder="uploads")
+            except sandbox.SandboxError as exc:
+                logger.warning("upload %s not copied to the sandbox: %s", attachment[0], exc)
+            row, problem = await files.store(account_id, session_id, *attachment)
+            document = files.document_block(row, path, problem)
+        user_item = ai.user_message(message, (attachment[0], path) if attachment and path else None, page, document)
         ctx = _context(turn, token, username, tickets)
         _turns[session_id] = turn
-        turn.task = asyncio.create_task(_run(turn, ctx, history_items(history or []), user_item))
+        replay = ([summary.summary_item(earlier)] if earlier else []) + history_items(history or [])
+        turn.task = asyncio.create_task(_run(turn, ctx, replay, user_item))
 
     while True:
         event = await turn.events.get()

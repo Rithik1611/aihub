@@ -3,13 +3,14 @@
 import asyncio
 import json
 
-from ai.apps.cablecore import actions, api, index, records
+from ai.apps.cablecore import access, actions, api, index, records
 from ai.context import TurnContext
 
 SPEC = {
     'paths': {
         '/design/{id}/copy': {'post': {'operationId': 'design.copy', 'description': 'Copy a design. Risk: write',
-                                       'parameters': [{'name': 'id', 'in': 'path'}]}},
+                                       'parameters': [{'name': 'id', 'in': 'path'}],
+                                       'x-access': {'keys': ['design'], 'write': ['design']}}},
         '/design/{id}/attributes': {'patch': {'operationId': 'design.update_plant_attributes', 'description': 'Update header values.',
                                               'parameters': [{'name': 'id', 'in': 'path'}],
                                               'requestBody': {'content': {'application/json': {'schema': {
@@ -20,7 +21,10 @@ SPEC = {
 }
 
 
-def setup(monkeypatch, calls):
+def setup(monkeypatch, calls, user: access.Access | None = None):
+    async def of(_token):
+        return user  # None: a backend without /auth/access, where only the API enforces
+
     async def spec(_token):
         return SPEC
 
@@ -39,6 +43,7 @@ def setup(monkeypatch, calls):
     monkeypatch.setattr(api, 'call', call)
     monkeypatch.setattr(records, 'find_any', find_any)
     monkeypatch.setattr(index, '_bm25', None)
+    monkeypatch.setattr(access, 'of', of)
 
 
 def ctx(answer, cards):
@@ -54,6 +59,14 @@ def test_invalid_route_runs_nothing(monkeypatch):
     setup(monkeypatch, calls)
     out = json.loads(asyncio.run(actions.run([{'id': 'design.nope'}], None, ctx({'approved': True}, cards))))
     assert out['status'] == 'invalid' and out['nothing_ran'] and not cards and not calls
+
+
+def test_read_only_user_gets_no_card(monkeypatch):
+    calls, cards = [], []
+    read_only = access.Access(access={'design': True}, write={'design': False})
+    setup(monkeypatch, calls, read_only)
+    out = json.loads(asyncio.run(actions.run([{'id': 'design.copy', 'path': {'id': 'D1'}}], None, ctx({'approved': True}, cards))))
+    assert out['status'] == 'not allowed' and access.READ_ONLY in out['refused'][0] and not cards and not calls
 
 
 def test_schema_problem_runs_nothing(monkeypatch):

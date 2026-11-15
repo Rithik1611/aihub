@@ -108,3 +108,14 @@ def test_turn(monkeypatch):
     assert second['input'][0]['content'][0]['text'] == 'earlier'
     assert {t['name'] for t in second['tools']} >= {'lookup', 'ask_user', 'search_web', 'fetch_url', 'delegate_task'}
     assert ask_user.TOOL.sequential
+
+
+def test_compact_keeps_newest_results_whole():
+    from ai.loop import STUB, compact
+
+    items = [{'type': 'function_call_output', 'call_id': str(n), 'output': 'x' * 1000} for n in range(8)]
+    items.insert(0, {'type': 'message', 'role': 'user', 'content': []})
+    assert compact(items, keep=6) == 2
+    outputs = [i['output'] for i in items[1:]]
+    assert all(o.startswith(STUB) for o in outputs[:2]) and all(o == 'x' * 1000 for o in outputs[2:])
+    assert compact(items, keep=6) == 0  # already cut: never cut twice
