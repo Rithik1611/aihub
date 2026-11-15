@@ -66,8 +66,33 @@ async def test_show_drawing_points_at_the_backend_route(monkeypatch):
     monkeypatch.setattr(cc_tools, 'settings', lambda: SimpleNamespace(cc_public_url='http://localhost:5000/'))
     signed_in = TurnContext(user_id='1', user_email='u', cc_token='jwt', chat_id='c', wait_answer=None)  # type: ignore[arg-type]
     design = '3f1c2a4e-9b7d-4c1a-8e2f-0a1b2c3d4e5f'
+    asked = []
+
+    async def backend_ok(method, path, token, **kwargs):
+        asked.append((method, path, token))
+        return 200, cc_tools.api.FileResult('drawing.png', b'png-bytes', 'image/png')
+
+    monkeypatch.setattr(cc_tools.api, 'call', backend_ok)
     assert await cc_tools.cc_show_drawing(signed_in, design) == f'![Design drawing](http://localhost:5000/erp/{design}/drawingurl)'
-    assert 'UUID' in await cc_tools.cc_show_drawing(signed_in, 'LV-7034')  # a design code, not its id: no URL is built from it
+    assert asked == [('GET', f'/erp/{design}/drawingurl', 'jwt')]  # asked as the user, on the route the browser will use
+    assert 'UUID' in await cc_tools.cc_show_drawing(signed_in, 'LV-7034')  # a design code, not its id: nothing is asked or built from it
+    assert len(asked) == 1
+
+
+async def test_show_drawing_reports_a_failure_instead_of_a_broken_picture(monkeypatch):
+    import importlib
+
+    cc_tools = importlib.import_module('ai.apps.cablecore.tools')
+    monkeypatch.setattr(cc_tools, 'settings', lambda: SimpleNamespace(cc_public_url='http://localhost:5000'))
+    signed_in = TurnContext(user_id='1', user_email='u', cc_token='jwt', chat_id='c', wait_answer=None)  # type: ignore[arg-type]
+
+    async def backend_refuses(method, path, token, **kwargs):
+        return 500, {'message': 'Failed to generate drawing: Endpoint hostname "x" is not in the allowed whitelist'}
+
+    monkeypatch.setattr(cc_tools.api, 'call', backend_refuses)
+    out = await cc_tools.cc_show_drawing(signed_in, '3f1c2a4e-9b7d-4c1a-8e2f-0a1b2c3d4e5f')
+    assert out.startswith('{"error"') and 'whitelist' in out  # run() marks it failed; the model is told to explain, not to show a picture
+    assert '![' not in out and 'do not show a picture' in out
 
 
 async def test_one_user_cannot_spend_the_quota_and_the_cache_stays_bounded(monkeypatch):

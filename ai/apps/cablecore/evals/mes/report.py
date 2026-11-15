@@ -10,6 +10,7 @@ Sheets: Summary (every count is a COUNTIF/COUNTIFS formula over Results), Result
 
 import json
 import sys
+from collections import Counter
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -19,6 +20,10 @@ use_cases = {u['id']: u for u in json.load(open(sys.argv[1], encoding='utf-8'))}
 cases = {c['id']: c for c in json.load(open(sys.argv[2], encoding='utf-8'))}
 results = {r['id']: r for r in json.load(open(sys.argv[3], encoding='utf-8'))}
 graded = {g['id']: g for g in json.load(open(sys.argv[4], encoding='utf-8'))}
+# optional 6th argument: the previous run's graded file, for a "change vs run 1" column
+run1 = {g['id']: g for g in json.load(open(sys.argv[6], encoding='utf-8'))} if len(sys.argv) > 6 else {}
+HAS_CHECKS = any(c.get('check') for c in cases.values())  # a run graded without answer keys has none to show
+RANK = {'not supported': 0, 'partly': 1, 'delivered': 2}
 
 DELIVERY = ['delivered', 'partly', 'not supported']
 QUALITY = ['correct', 'flawed']
@@ -54,7 +59,11 @@ def widths(ws, ws_widths):
 # ---- Results: A ID, B Area, C Use case, D Impl, E Phase, F Prompt, G Delivered?, H Answer quality, I Reviewer verdict,
 #              J What it did, K Why, L MES tools, M Latency, N Case check
 COLS = ['ID', 'Area', 'AI use case', 'Implementation type', 'Phase', 'Prompt asked', 'Delivered?', 'Answer quality', 'Reviewer verdict',
-        'What the assistant did', 'Why', 'MES tools called', 'Latency (s)', 'What a good answer needed']
+        'What the assistant did', 'Why', 'MES tools called', 'Latency (s)']
+if run1:
+    COLS += ['Run 1: Delivered?', 'Change vs run 1']
+if HAS_CHECKS:
+    COLS += ['What a good answer needed']
 header(res, 1, COLS)
 order = list(use_cases)
 rows = []
@@ -62,13 +71,19 @@ for r, uid in enumerate(order, 2):
     u, c, g = use_cases[uid], cases.get(uid, {}), graded.get(uid, {})
     run = results.get(uid)
     turn = run['turns'][-1] if run else {}
-    tools = ', '.join(sorted({t['name'] for t in turn.get('tools') or [] if t['name'].startswith('mes_')})) or ('(none)' if run else 'not run')
+    tools = ', '.join(sorted({t['name'].replace('mes_mes_', 'mes_') for t in turn.get('tools') or [] if t['name'].startswith('mes_')})) or ('(none)' if run else 'not run')
     delivery, quality = g.get('delivery', 'not run'), g.get('behaviour', 'not run')
     values = [uid, u['area'], u['name'], u['impl'], u['phase'], (c.get('turns') or [''])[0], delivery, quality, g.get('result', 'not run'),
-              g.get('summary', ''), g.get('reason', ''), tools, turn.get('latency_s'), c.get('check', '')]
+              g.get('summary', ''), g.get('reason', ''), tools, turn.get('latency_s')]
+    if run1:
+        before = run1.get(uid, {}).get('delivery', 'not run')
+        change = ('improved' if RANK.get(delivery, -1) > RANK.get(before, -1) else 'worse' if RANK.get(delivery, -1) < RANK.get(before, -1) else 'same')
+        values += [before, change]
+    if HAS_CHECKS:
+        values.append(c.get('check', ''))
     put(res, r, values, {7: delivery, 8: quality})
     rows.append(values)
-widths(res, [8, 22, 30, 22, 22, 55, 14, 14, 14, 55, 45, 28, 10, 50])
+widths(res, [8, 22, 30, 22, 22, 55, 14, 14, 14, 55, 45, 28, 10] + ([16, 14] if run1 else []) + ([50] if HAS_CHECKS else []))
 res.freeze_panes = 'D2'
 res.auto_filter.ref = f'A1:{get_column_letter(len(COLS))}{len(order) + 1}'
 last = len(order) + 1
@@ -118,6 +133,13 @@ def breakdown(start, title, col_letter, keys):
 
 
 row = 21
+if run1:  # 'Change vs run 1' is the column after 'Run 1: Delivered?' (O); the label is computed in Python from the two graded files
+    header(summary, 21, ['Change vs run 1', 'Use cases'])
+    for i, v in enumerate(['improved', 'same', 'worse'], 22):
+        summary.cell(row=i, column=1, value=v).font = ARIAL
+        summary.cell(row=i, column=2, value=f'=COUNTIF(Results!$O$2:$O${last},A{i})').font = ARIAL
+    summary.cell(row=25, column=1, value='Run 2 had 22 MES tools; run 1 had 4. Not a like-for-like comparison.').font = Font(name='Arial', size=10, italic=True)
+    row = 27
 row = breakdown(row, 'By area', 'B', sorted({u['area'] for u in use_cases.values()}))
 row = breakdown(row, 'By implementation type', 'D', sorted({u['impl'] for u in use_cases.values()}))
 row = breakdown(row, 'By phase', 'E', sorted({u['phase'] for u in use_cases.values()}))
@@ -145,6 +167,5 @@ widths(flawed, [8, 30, 50, 14, 60, 70])
 flawed.freeze_panes = 'A2'
 
 wb.save(sys.argv[5])
-from collections import Counter
 print('saved', sys.argv[5])
 print('delivered?:', dict(Counter(v[6] for v in rows)), '| quality:', dict(Counter(v[7] for v in rows)), '| flawed sheet rows:', n - 2)

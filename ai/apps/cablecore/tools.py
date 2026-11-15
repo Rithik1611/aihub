@@ -492,16 +492,23 @@ async def cc_show_drawing(ctx: TurnContext, design_id: str) -> str:
     """
     Show a design's cable drawing (its cross-section) in the chat. Use it when the user asks to see a design's
     drawing, construction or what it looks like. The picture loads in the user's own browser with their own
-    session, so only they can see it. Put the returned markdown line in your reply as it is.
+    session, so only they can see it. The backend is asked first, so a drawing that cannot be made is reported
+    instead of shown as a broken picture. Put the returned markdown line in your reply as it is.
 
     :param design_id: the design's id (the `id` from cc_search or cc_get; a UUID), not its code
-    :return: the markdown image line to put in the reply
+    :return: the markdown image line to put in the reply, or the reason the drawing is not available
     """
-    _token(ctx)  # signed in; the backend checks the user's role and session again when the picture loads
+    token = _token(ctx)
     try:
         uuid.UUID(design_id)
     except ValueError:
         return "design_id must be the design's id (a UUID from cc_search or cc_get), not its code."
+    # The same request the browser will make, as the user: the drawing service may be down or not allowed, and a broken
+    # picture tells the user nothing. (The backend renders it twice this way; a cache there would make the second one free.)
+    status, data = await api.call('GET', f'/erp/{design_id}/drawingurl', token, timeout_s=60)
+    if error := api.failed(status, data):
+        return json.dumps({'error': f'The drawing could not be produced ({error[:240]}). Tell the user the drawing is not '
+                                    'available right now and say why; do not show a picture.'})
     return f'![Design drawing]({settings().cc_public_url.rstrip("/")}/erp/{design_id}/drawingurl)'
 
 

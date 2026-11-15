@@ -34,3 +34,17 @@ Notes:
   in a clean environment (test_types no longer needs a real LLM key). Live aihub rebuilt with the fix.
 - Smoke answers confirm the expected shape: N029 computed yield 73.9% correctly but omitted required/error qty (reviewer should say partial);
   N027 admitted no speed data but then offered generic options; N077 named no die and asked for the die list.
+
+## RUN 2 (user asked to re-run everything from the start)
+- Run 1 outputs archived in out/run1/. Run 2 started 2026-11-15 11:52 as container mes-eval (same 84 cases, same login, same commands as run 1; the ai/ code on disk was newer than run 1). Steps: run -> grade -> report -> Downloads\MES_Evaluation_Results_run2.xlsx -> compare with run 1.
+- RUN 2 FINDING (12:03): run 2 finished 84/84, 0 errors, median 19.4 s. BUT the MES MCP server now exposes 22 tools (was 4 in run 1; see out/../mes_tools_now.json):
+  sites, machines (state/queue/history/comments/documents), jobs + job counts, lots (+ why_lot_unavailable, find_lot), production orders, shift window, inventory lots/summary,
+  storage, quality orders (parameters/limits/recorded values), rework, knowledge search (documents/SharePoint, site knowledge, help topics), documents list, help topics.
+  Tool names are now double-prefixed (mes_mes_list_jobs) because the server's names already start with mes_ (cosmetic; ai/mes.py could skip the prefix when present).
+  The aihub code on disk was also newer than run 1 (load_skill, cc_attributes tools). So run 2 measures a MORE CAPABLE system than run 1: do not compare them as like for like.
+  The run-1 case 'check' answer keys and the run-1 reviewer briefing assume only 4 tools, so they are WRONG for run 2: run 2 is graded with an updated briefing and WITHOUT the
+  per-case checks (cases.nocheck.json). Limitation: the reviewer sees tool names/args, not tool outputs, so 'grounded' is judged from the answer text.
+- RUN 2 DONE: graded with the 22-tool briefing and no per-case checks. delivery 1 delivered (N130; on reading I disagree, it is really not supported) / 44 partly / 39 not supported;
+  quality 67 correct / 17 flawed. vs run 1: 21 improved, 61 same, 2 worse (N116, N135: partly -> not supported because the agent now actually looked in machine documents, knowledge and
+  quality orders and found nothing). Report: out/MES_Evaluation_Results_run2.xlsx (copied to Downloads); 60/60 summary formulas recomputed independently and matched.
+  Still impaired: DesignCenter lookups (cc_attributes 18 + cc_search 7 failed: ai_reader DB login), and 8 get_machine failures (machines not assigned to the DCAdmin account, e.g. EXT-L-2).

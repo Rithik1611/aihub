@@ -76,7 +76,10 @@ A new app is a new folder in `apps/` exposing `instructions(ctx)`, `tools()` and
 |---|---|---|
 | `LUNA_BASE_URL`, `LUNA_API_KEY`, `LUNA_MODEL` | — | Azure OpenAI (Responses API) |
 | `CC_API_URL` | `http://localhost:5000` | cableCORE backend (needs `OPENAPI_DOCS=true`) |
-| `CC_DB_URL` | — | read-only Postgres DSN (`ai_reader`) |
+| `CC_DB_URL` | — | read-only Postgres DSN for the `ai_reader` role. Create or refresh the role with `scripts/create_ai_reader.py` (SELECT only; no credential, secret, chat or audit tables; 30 s statement timeout; `--verify` checks it; re-run it after a migration adds tables, new tables are not readable until then). In Docker use `host.docker.internal`: the host is kept inside a container and rewritten to `localhost` when the process runs on the host |
+| `CC_PUBLIC_URL` | `http://localhost:5000` | the backend as the user's browser reaches it: design drawings in the chat load from `<CC_PUBLIC_URL>/erp/<design id>/drawingurl` (the browser sends its own session cookie; the frontend and the API must share a site) |
+| `SERPAPI_KEY` | — | picture search for the chat (`search_images`, SerpAPI Google Images, SafeSearch on, only Google thumbnails are returned; 10 searches per user per hour, answers cached for an hour). Empty = no such tool |
+| `MES_MCP_URL`, `MES_USER_TOKENS` | —, — | MES (Mendix MCP server) tools, see below. `MES_USER_TOKENS` is JSON `{"cableCORE username": "token"}`. Empty URL or no token for the user = no MES tools |
 | `CC_TERMINAL_URL`, `OPEN_TERMINAL_API_KEY` | `http://localhost:8070` | sandbox |
 | `CC_SCHEMA_DIR` | `../cableCORE_BE/prisma/models` | Prisma schema files |
 | `CC_NOTES_FILE` | `apps/cablecore/app_notes.md` | app notes |
@@ -90,6 +93,16 @@ A new app is a new folder in `apps/` exposing `instructions(ctx)`, `tools()` and
 | `LANGFUSE_TRACING`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | off | Langfuse tracing (self-hosted): one trace per chat turn, session = chat, every model call nested under it. Traces contain chat content |
 
 All are declared and validated in [settings.py](settings.py).
+
+## MES tools and the MES evaluation
+
+`ai/mes.py` hands the model the user's plant MES as `mes_*` tools: live, read-only, one token per user. The tool list comes from the server itself (cached 10 minutes), the MES's `{"tool", "data"}` wrapper is removed before the model sees an answer, and every request carries its own JSON-RPC id (the tool calls of a step run in parallel over one session; an answer to a different request is refused, never passed on). The MES instructions in `mes.py` (`PROMPT`) are part of the behaviour: plant facts only from tool results, never an unsupported number, say what data is missing, look before saying "not found".
+
+The evaluation (`apps/cablecore/evals/`) runs cases through the real loop (`run.py`) and has an LLM reviewer score each one (`grade.py`): **delivered?** (delivered, partly, not supported: a correct refusal is "not supported / correct") and **answer quality** (correct, flawed). The 84 MES use cases are in `evals/mes/` (`PLAN.md` has the exact commands, `report.py` builds the Excel report, `ui/` has browser scripts for an end-to-end check in the UI).
+
+- Credentials stay out of the image and the repo: the evaluation signs in with `EVAL_USER` / `EVAL_PASS` from `.env.eval` (git-excluded; a run signs in once and ends that user's browser session). `EVAL_USER_EMAIL` picks the user whose MES token is used. Run it with `SERPAPI_KEY=` empty so it cannot spend picture-search quota.
+- The reviewer sees tool names and arguments, not tool outputs: a claim it cannot verify may be flagged as unsupported. Read a few verdicts before trusting the totals.
+- Results of earlier runs are kept in `evals/mes/out/run*/`; compare like with like (the MES tool set and the code change between runs).
 
 ## Context: what each request carries
 
