@@ -11,7 +11,7 @@ import os
 from dataclasses import replace
 from typing import AsyncIterator
 
-from ai import apps, ask_user, http, sandbox, web
+from ai import apps, ask_user, http, imagegen, images, mes, sandbox, web
 from ai.context import Event, TurnContext
 from ai.tools import Tool, run, tool
 
@@ -148,7 +148,7 @@ def _delegate_tool(instructions: str, tools: dict[str, Tool], usage: dict[str, i
 
 async def turn_tools(ctx: TurnContext, instructions: str, usage: dict[str, int]) -> dict[str, Tool]:
     pack = apps.get(ctx.app_id)
-    tools = [*pack.tools(), ask_user.TOOL, *web.TOOLS, *await sandbox.tools(ctx)]
+    tools = [*pack.tools(), ask_user.TOOL, *web.TOOLS, *images.tools(), *imagegen.tools(), *await sandbox.tools(ctx), *await mes.tools(ctx)]
     by_name = {t.name: t for t in tools}
     by_name['delegate_task'] = _delegate_tool(instructions, by_name, usage)
     return by_name
@@ -160,7 +160,7 @@ async def run_turn(ctx: TurnContext, history: list[dict], message: dict) -> Asyn
     turn_items = [message]
     try:
         pack = apps.get(ctx.app_id)
-        instructions = await pack.instructions(ctx) + await sandbox.instructions(ctx)
+        instructions = await pack.instructions(ctx) + await sandbox.instructions(ctx) + await mes.instructions(ctx)
         tools = await turn_tools(ctx, instructions, usage)
         items = [*history, message]
         start = len(items)

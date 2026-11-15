@@ -3,11 +3,13 @@ describe -> action with approval), app notes, and the sandbox's read ticket."""
 
 import asyncio
 import json
+import uuid
 from typing import Any, Literal
 
 from ai.apps.cablecore import actions as harness, api, formula, index, notes, records, related
 from ai.apps.cablecore.actions import Action
 from ai.context import TurnContext
+from ai.settings import settings
 from ai.tools import Tool, tool
 
 
@@ -241,6 +243,23 @@ async def cablecore_api_access(ctx: TurnContext, purpose: str) -> str:
     return json.dumps(await ctx.tickets.issue(ctx.user_id, ctx.chat_id))
 
 
+async def cc_show_drawing(ctx: TurnContext, design_id: str) -> str:
+    """
+    Show a design's cable drawing (its cross-section) in the chat. Use it when the user asks to see a design's
+    drawing, construction or what it looks like. The picture loads in the user's own browser with their own
+    session, so only they can see it. Put the returned markdown line in your reply as it is.
+
+    :param design_id: the design's id (the `id` from cc_search or cc_get; a UUID), not its code
+    :return: the markdown image line to put in the reply
+    """
+    _token(ctx)  # signed in; the backend checks the user's role and session again when the picture loads
+    try:
+        uuid.UUID(design_id)
+    except ValueError:
+        return "design_id must be the design's id (a UUID from cc_search or cc_get), not its code."
+    return f'![Design drawing]({settings().cc_public_url.rstrip("/")}/erp/{design_id}/drawingurl)'
+
+
 def tools() -> list[Tool]:
-    return [tool(cc_search), tool(cc_get), tool(cc_related), tool(cc_formula), tool(cc_find), tool(cc_describe),
+    return [tool(cc_search), tool(cc_get), tool(cc_related), tool(cc_formula), tool(cc_find), tool(cc_describe), tool(cc_show_drawing),
             tool(cc_action, sequential=True), tool(cc_note), tool(cablecore_api_access, sequential=True)]

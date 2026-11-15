@@ -1,0 +1,13 @@
+# aihub only. Run: docker compose up -d --build   (needs .env here; Postgres, cableCORE_BE and the terminal run on the host)
+services:
+  aihub:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:  # the .env's localhost values don't work inside a container
+      DATABASE_URL: ${AIHUB_DATABASE_URL}
+      CORS_ORIGINS: '["http://localhost:3000"]'
+      CC_API_URL: http://host.docker.internal:5000
+      CC_TERMINAL_URL: http://host.docker.internal:8070
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["8000:8000"]

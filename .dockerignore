@@ -1,0 +1,19 @@
+# Never ship secrets or local state in the image: the .env is read at run time (compose env_file), not baked in.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.gitignore
+.vscode
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests
+**/tests
+docs

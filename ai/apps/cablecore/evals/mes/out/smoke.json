@@ -1,0 +1,114 @@
+[
+ {
+  "id": "N027",
+  "group": "Production Quality",
+  "chat_id": "eval-N027",
+  "turns": [
+   {
+    "prompt": "What is the fastest line speed we can run on ARM-1 for job POT5244_1 without hurting quality? Compare two options.",
+    "latency_s": 17.8,
+    "answer_s": 14.9,
+    "checked": true,
+    "first_token_s": 12.2,
+    "error": null,
+    "answer": "## Job POT5244_1 — ARM-1\n\nThe MES record does **not contain a line-speed setpoint, ARM-1 maximum speed, or historical quality results** for this job. Since the job is **New** with **0 m produced, 0 good, and 0 scrap/NCM**, the fastest speed that will not affect quality cannot be proven from the available data.\n\n| Option | Recommended approach | Quality confidence | Speed conclusion |\n|---|---|---:|---|\n| **1. Qualified baseline** | Run at ARM-1’s established, validated speed for **double steel-tape armouring** of this 0.6/1 kV cable. Confirm tape overlap, tension, pitch and outer diameter on the first lot. | Highest | **Fastest defensible option today**, but the actual value is not recorded in MES |\n| **2. Controlled speed increase** | Start at the qualified baseline, then increase in small steps while checking overlap, tape tracking/tension, armour coverage, diameter, and surface damage. Hold only after quality remains stable. | Medium until validated | May be faster, but the maximum safe speed must be established during the trial |\n\n**Recommendation:** use **Option 1 for production release** unless ARM-1’s validated speed is known from the machine recipe or work instruction. Use Option 2 only as a documented trial; do not select a numeric “fastest” speed from this MES record alone. The job has **900 required units across nine 100-unit lots**, with no material currently allocated.",
+    "tools": [
+     {
+      "name": "mes_get_job_detail",
+      "status": "completed",
+      "args": "{\"JobCode\":\"POT5244_1\"}"
+     },
+     {
+      "name": "cc_search",
+      "status": "completed",
+      "args": "{\"kind\":\"design\",\"query\":\"ARMCUXNWT-2\",\"page\":1,\"page_size\":20,\"plant\":\"\",\"fields\":[]}"
+     }
+    ],
+    "confirmations": []
+   }
+  ]
+ },
+ {
+  "id": "N029",
+  "group": "Production Quality",
+  "chat_id": "eval-N029",
+  "turns": [
+   {
+    "prompt": "What is the first-pass yield so far on the jobs that are InProgress?",
+    "latency_s": 17.0,
+    "answer_s": 14.1,
+    "checked": true,
+    "first_token_s": 12.8,
+    "error": null,
+    "answer": "## First-pass yield for InProgress jobs\n\nUsing **FPY = good quantity ÷ completed quantity**:\n\n| Job | Completed | Good | First-pass yield |\n|---|---:|---:|---:|\n| POT5300 | 100 | 0 | 0.0% |\n| TEST-ALLOCATE | 950 | 190 | 20.0% |\n| PO007679 | 110 | 100 | 90.9% |\n| PO008964-10 | 2,500 | 2,500 | 100.0% |\n| PO009654-10-INSULATING | 250 | 100 | 40.0% |\n| **Total** | **3,910** | **2,890** | **73.9%** |\n\n**Overall first-pass yield so far: 73.9%.**\n\nThis uses the MES quantities currently reported; the POT5300 and some TEST-ALLOCATE completed quantities have zero reported good quantity, which significantly lowers the aggregate yield.",
+    "tools": [
+     {
+      "name": "mes_get_job_list",
+      "status": "completed",
+      "args": "{\"Status\":\"InProgress\",\"JobCode\":\"\",\"MachineName\":\"\"}"
+     },
+     {
+      "name": "mes_get_job_detail",
+      "status": "completed",
+      "args": "{\"JobCode\":\"POT5300\"}"
+     },
+     {
+      "name": "mes_get_job_detail",
+      "status": "completed",
+      "args": "{\"JobCode\":\"TEST-ALLOCATE\"}"
+     },
+     {
+      "name": "mes_get_job_detail",
+      "status": "completed",
+      "args": "{\"JobCode\":\"PO007679\"}"
+     },
+     {
+      "name": "mes_get_job_detail",
+      "status": "completed",
+      "args": "{\"JobCode\":\"PO008964-10\"}"
+     },
+     {
+      "name": "mes_get_job_detail",
+      "status": "completed",
+      "args": "{\"JobCode\":\"PO009654-10-INSULATING\"}"
+     }
+    ],
+    "confirmations": []
+   }
+  ]
+ },
+ {
+  "id": "N077",
+  "group": "Dies & Tooling",
+  "chat_id": "eval-N077",
+  "turns": [
+   {
+    "prompt": "Which extrusion die should I use for job PO007700_1 from our approved die inventory?",
+    "latency_s": 16.9,
+    "answer_s": 15.5,
+    "checked": true,
+    "first_token_s": 14.6,
+    "error": null,
+    "answer": "I can’t select a die reliably from the available records. Job **PO007700_1** is:\n\n- **Cable:** 0.6/1 kV, 2C × 25 mm² Cu, XLPE/SWA/PVC\n- **Operation:** SHEATHING\n- **Machine:** Ext-S-2\n- **Status:** New\n\nThe job record does not specify the required finished sheath diameter or die, and I could not access the approved die-inventory records. Please provide the approved die list for **Ext-S-2** (or the cable’s calculated sheath/finished diameter), and I can identify the correct die.",
+    "tools": [
+     {
+      "name": "mes_get_job_detail",
+      "status": "completed",
+      "args": "{\"JobCode\":\"PO007700_1\"}"
+     },
+     {
+      "name": "cc_search",
+      "status": "completed",
+      "args": "{\"kind\":\"design\",\"query\":\"3518518-MES\",\"page\":1,\"page_size\":20,\"plant\":\"\",\"fields\":[]}"
+     },
+     {
+      "name": "cc_search",
+      "status": "failed",
+      "args": "{\"kind\":\"design\",\"query\":\"2CX25mm2 CU C2 XLPE SWA PVC\",\"page\":1,\"page_size\":20,\"plant\":\"\",\"fields\":[\"conductorCSA\",\"noOfCores\",\"conductorType\",\"armourMaterial\",\"INSULATING.nomThickness\",\"SHEATHING.nomThickness\"]}"
+     }
+    ],
+    "confirmations": []
+   }
+  ]
+ }
+]

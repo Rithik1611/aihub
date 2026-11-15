@@ -1,0 +1,78 @@
+{
+ "tools": {
+  "mes_get_job_list": [
+   "Status",
+   "JobCode",
+   "MachineName"
+  ],
+  "mes_get_job_detail": [
+   "JobCode"
+  ],
+  "mes_list_production_orders": [
+   "Status"
+  ],
+  "mes_get_lot_inventory": [
+   "ItemId",
+   "LocationName"
+  ]
+ },
+ "jobs_header": "Jobs found: 287 (sorted by sequence):",
+ "job_machines": {
+  "ARM-1": 7,
+  "Ext-S-4": 6,
+  "CCM-003": 1,
+  "Ext-S-2": 6,
+  "Ext-S-3": 6,
+  "ARM-S-10": 8,
+  "Drw-1": 1,
+  "TEST_MSH": 1,
+  "EXT-L-2": 2,
+  "BED-1": 1,
+  "EXT-S-1": 1,
+  "LT-M1": 2,
+  "Bunch-5": 1,
+  "Drw-5": 1,
+  "CCM-002": 1,
+  "CCM-03": 1,
+  "EXT-L-1": 1,
+  "Bunch 4": 2,
+  "LTHHN 4": 1
+ },
+ "job_statuses": {
+  "_New": 32,
+  "Ready": 8,
+  "Cancelled_Jobs": 1,
+  "InProgress": 3,
+  "Suspended_Jobs": 6
+ },
+ "job_items": {
+  "ARMCUXNWT-2": 16,
+  "POWER-CORE-DEMO": 1,
+  "3518518-MES": 17,
+  "CUW-1.02-PAC": 2,
+  "12N-CCA-Am": 4,
+  "POWER-CABLE-SWA": 3,
+  "ARMCUXNWT-1": 1,
+  "CUCON-1.02-PAC": 3,
+  "POWER-CORE-MES": 2,
+  "Testing": 1
+ },
+ "job_samples": [
+  "- POT5244_1 | machine: ARM-1 | item: ARMCUXNWT-2 | status: _New | qty required/completed/good/error: 900/0/0/0 | start: 03 Nov 2025, 07:00 AM | end: 05 Nov 2025, 07:00 AM | sequence: 0",
+  "- PO009923-10-INSULATING_1 | machine: Ext-S-4 | item: POWER-CORE-DEMO | status: _New | qty required/completed/good/error: 100/0/0/0 m | start: 30 Oct 2026, 10:30 PM | end: 30 Oct 2026, 11:42 PM | sequence: 0",
+  "- PO007713_1 | machine: Ext-S-4 | item: 3518518-MES | status: _New | qty required/completed/good/error: 30/0/0/0 | start: 13 Feb 2026, 07:00 AM | end: 13 Feb 2026, 08:09 AM | sequence: 0",
+  "- PO007717_1 | machine: CCM-003 | item: 3518518-MES | status: _New | qty required/completed/good/error: 100/0/0/0 | start: 19 Feb 2026, 10:43 AM | end: 19 Feb 2026, 12:01 PM | sequence: 0",
+  "- POT5230_1 | machine: ARM-1 | item: ARMCUXNWT-2 | status: _New | qty required/completed/good/error: 800/0/0/0 | start: 03 Nov 2025, 07:00 AM | end: 05 Nov 2025, 07:00 AM | sequence: 0",
+  "- PO007700_1 | machine: Ext-S-2 | item: 3518518-MES | status: _New | qty required/completed/good/error: 100/0/0/0 | start: 11 Feb 2026, 11:24 AM | end: 12 Feb 2026, 04:12 AM | sequence: 0"
+ ],
+ "detail_sample": "Job POT5244_1 - status New. Machine: ARM-1. Item: ARMCUXNWT-2 - DOUBLE STEEL TAPE ARMOUR 0.6/1kV IEC 60502-1Non Woven  XLPE Non Grade Br, Bk, Gy, Bl 8. Production order n/a, operation 0 (Armouring- For Site area-1). Planned 03 Nov 2025 07:00 to 05 Nov 2025 07:00, duration 3. Progress: required 900, completed 0, good 0, NCM 0, scrap/error 0. Lots:\n- CBL_0990154 (seq 15): Ready, required 100, produced 0, good 0, scrap 0, no material allocated\n- CBL_0989680 (seq 12): Ready, required 100, produced 0, good 0, scrap 0, no material allocated\n- CBL_0990470 (seq 17): Ready, required 100, produced 0, good 0, scrap 0, no material allocated\n- CBL_0989996 (seq 14): Ready, required 100, produced 0, good 0, scrap 0, no material allocated\n- CBL_0989838 (seq 13): Ready, required 100, produced 0, good 0, scrap 0, no material allocated\n- CBL_0990312 (seq 16): Ready, required 100, produced 0, good 0, scrap ",
+ "orders_header": "No production orders with status  were found in your site area.",
+ "order_samples": [],
+ "order_statuses": {},
+ "inventory_probe": {
+  "(none)": "Lot inventory of item ARMCUXNWT-2 in location : 0 lot(s) in total, total quantity 0. Usable quantity (Good, Available, same unit as the item): 0. This usable quantity is what is available; the quantity allocated to machines (0) is for information only and is not subtracted. Quantity is the lot Quant",
+  "Warehouse": "Lot inventory of item ARMCUXNWT-2 in location Warehouse: 0 lot(s) in total, total quantity 0. Usable quantity (Good, Available, same unit as the item): 0. This usable quantity is what is available; the quantity allocated to machines (0) is for information only and is not subtracted. Quantity is the ",
+  "Main Warehouse": "Lot inventory of item ARMCUXNWT-2 in location Main Warehouse: 0 lot(s) in total, total quantity 0. Usable quantity (Good, Available, same unit as the item): 0. This usable quantity is what is available; the quantity allocated to machines (0) is for information only and is not subtracted. Quantity is",
+  "Store": "Lot inventory of item ARMCUXNWT-2 in location Store: 0 lot(s) in total, total quantity 0. Usable quantity (Good, Available, same unit as the item): 0. This usable quantity is what is available; the quantity allocated to machines (0) is for information only and is not subtracted. Quantity is the lot "
+ }
+}

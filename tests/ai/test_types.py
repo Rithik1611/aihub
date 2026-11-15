@@ -115,6 +115,11 @@ def test_langchain_tool_goes_through_validation():
 
 
 def test_tracing_wraps_the_model_client_only_when_enabled(monkeypatch):
+    from pydantic import SecretStr
+
+    # No real key needed (and none in a clean environment or the image): the client is only built, never called.
+    monkeypatch.setattr(settings(), 'luna_base_url', 'http://localhost:1')
+    monkeypatch.setattr(settings(), 'luna_api_key', SecretStr('test-key'))
     monkeypatch.setattr(http, '_llm', None)
     monkeypatch.setattr(settings(), 'langsmith_tracing', False)
     plain = http.llm()

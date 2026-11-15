@@ -26,6 +26,8 @@ FILES = pathlib.Path(os.getenv('EVAL_FILES', 'C:/DDM/ai-demo-files'))
 
 
 async def login() -> str:
+    if os.getenv('EVAL_NO_LOGIN'):  # e.g. the MES evaluation: its tools need the user's name (EVAL_USER_EMAIL), not a cableCORE session
+        return ''
     async with aiohttp.ClientSession() as s:
         async with s.post(f'{api.CC_API_URL}/auth/token', json={'username': os.environ['EVAL_USER'], 'password': os.environ['EVAL_PASS']}) as r:
             body = await r.json()
@@ -61,7 +63,7 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
                 confirms.append('ASK_USER: ' + ' | '.join(f"{q.question} [{', '.join(o.label for o in q.options)}]" for q in card.questions))
                 return Answer(status='answered', answers={q.id: q.options[0].label for q in card.questions})
 
-            ctx = TurnContext(user_id='eval', user_email='eval@cablecore.local', cc_token=token, chat_id=f"eval-{case['id']}",
+            ctx = TurnContext(user_id='eval', user_email=os.getenv('EVAL_USER_EMAIL', 'eval@cablecore.local'), cc_token=token, chat_id=f"eval-{case['id']}",
                               wait_answer=wait_answer, tickets=Tickets())
             attachment = None
             if n == 0 and case.get('file'):

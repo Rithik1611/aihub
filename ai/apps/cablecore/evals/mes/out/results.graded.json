@@ -1,0 +1,674 @@
+[
+ {
+  "id": "N021",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant accurately reported the job details and clearly declined to provide extrusion settings because no approved recipe or process parameters were available in the reachable data. It appropriately warned against running the job with unverified settings.",
+  "reason": "The required approved recipe and machine-process data are not available through the system’s accessible sources, so the use case cannot be delivered for this request."
+ },
+ {
+  "id": "N022",
+  "result": "fail",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant correctly reported the job’s basic MES facts and acknowledged that no eccentricity measurement or prediction data was available. However, it still labelled the run as “potentially elevated” risk and gave process-specific concerns, which goes beyond the available evidence and violates the prompt’s requirement not to give an eccentricity risk classification.",
+  "reason": "Because it presented an unsupported risk characterization despite having no lab, process, historical, or prediction data, the response did not meet the use case and was not fully grounded."
+ },
+ {
+  "id": "N023",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly listed the two queued jobs and identified the risk as unverified, with first-off wall and concentricity checks as the next action. It did not claim a thickness-variation risk or value, and acknowledged that the available data could not support one.",
+  "reason": "The required thickness and process measurement data are not available in the reachable MES view, so the use case cannot deliver an actual risk assessment for these jobs."
+ },
+ {
+  "id": "N024",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The answer correctly identified the next job, linked it to MES job and lot information, acknowledged that surface-defect data was unavailable, and provided practical checks. However, it still labelled the surface-flaw risk as elevated based on generic production outcomes and called a prior lot a failure without sufficient supporting evidence.",
+  "reason": "The response was useful and transparent about missing defect data, but its elevated-risk conclusion was not grounded in available surface-defect or inspection records."
+ },
+ {
+  "id": "N025",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly identified the CCM-003 job and clearly stated that curing adequacy cannot be determined because the available process view contains no curing measurements. It did not deliver a curing assessment, but that capability is not supported by the available data.",
+  "reason": "The use case requires process data such as temperatures, line speed, or cure measurements, which are not available, and the answer honestly reported that limitation without inventing a curing result."
+ },
+ {
+  "id": "N026",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant correctly stated that it could not verify Ext-S-3 settings or approved limits and did not claim that any change was approved or applied. It offered general, conditional cooling ideas, but did not provide the structured, source-linked result and clear MES next action expected by the use case.",
+  "reason": "The required cooling and approval data was unavailable, so the use case could not be fully delivered; the response was honest and avoided unsupported specific temperatures or lengths."
+ },
+ {
+  "id": "N027",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly calculated the job plan’s implied rate of 18.75 units/hour and clearly stated that no quality-safe maximum could be established from the available data. It offered two clearly qualified options, identified the evidence gap, and proposed a controlled trial.",
+  "reason": "The required machine-speed, tooling, process-history, and quality data needed to determine a fastest safe speed are not available through the system, so the use case could not be delivered despite the answer being grounded and honest."
+ },
+ {
+  "id": "N028",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The answer correctly reported the available MES quantities and explained that no evidence-based scrap expectation can be calculated because ARM-1 has no completed quantity for this item. However, it did not list the ARM-1 jobs as requested, nor provide confidence, conditions, or comparable historical evidence.",
+  "reason": "Its statements and arithmetic are grounded in the reported quantities, but it omitted the required job-level history and therefore did not fully deliver the scrap-prediction use case."
+ },
+ {
+  "id": "N029",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The system reported per-job good-versus-completed yields and calculated those percentages correctly. However, it omitted required and error quantities, and its overall 73.9% combines jobs with mixed units, including metres and unspecified counts, so that total is not a valid yield measure.",
+  "reason": "The answer was useful but incomplete and presented a misleading cross-job total without the required quantity fields or a clear handling of unit differences."
+ },
+ {
+  "id": "N030",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The assistant produced a partial ARM-1 ranking and clearly stated that the MES lacks true complexity data. However, it used disallowed criteria such as suspension, material allocation, scrap, and production status, omitted planned duration, and did not individually rank all 92 jobs.",
+  "reason": "The response is useful but does not follow the required MES-only ranking criteria or provide a complete, reviewable ranking."
+ },
+ {
+  "id": "N042",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The answer correctly reported the single MES routing job, its planned window, status, progress, and the 78-minute planned interval. However, it did not provide a genuine production-time prediction with uncertainty or historical comparisons, and it made an unsupported “very unlikely” on-time assessment.",
+  "reason": "The plan and status were useful and mostly grounded, but the slip-risk conclusion goes beyond the available MES evidence and violates the requirement not to invent a probability or unsupported prediction."
+ },
+ {
+  "id": "N043",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The answer usefully identified six Ready jobs whose lots showed no material allocated and disclosed seven jobs it could not assess. However, it presented those six as confirmed delay risks without establishing that the material was unavailable or checking inventory where possible.",
+  "reason": "No material allocation is a warning sign, not proof of a shortage or delayed production, so the answer overstates what the MES data supports and does not provide a genuine prediction, confidence, or historical comparison."
+ },
+ {
+  "id": "N061",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The answer correctly reported the job’s machine, routing step, planned quantity, and planned duration, then calculated and clearly labelled the implied rate as a plan-based figure rather than an achievable-speed prediction. It also honestly stated that routing-speed history and machine-performance data were unavailable.",
+  "reason": "It provided a useful implied rate but did not deliver the requested predicted achievable speed with confidence, conditions, and comparable historical evidence; those inputs were unavailable, so this is a capability limitation rather than a factual error."
+ },
+ {
+  "id": "N062",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant correctly explained that the available data does not contain process or quality limits, so it could not provide a compliant speed recommendation. However, it made unsupported claims about a “validated setting/rate” and the absence of NCM or scrap.",
+  "reason": "The required line-speed limits and actual speed settings are unavailable, and the answer also included findings that were not supported by the shown evidence."
+ },
+ {
+  "id": "N063",
+  "result": "fail",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The answer correctly reported some job information and calculated 100 m over 2.5 hours, but it presented 0.67 m/min as an extrusion-speed estimate and invented layer geometry and PVC output figures.",
+  "reason": "The available MES view does not contain layer geometry or evidence for an extrusion-speed prediction, so the answer should have stated that the requested estimate is not supported rather than supplying speculative values."
+ },
+ {
+  "id": "N064",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant did not calculate a production speed because RPM and lay length were unavailable, and it appropriately requested those inputs. However, it incorrectly attributed the missing item data to DesignCenter being unavailable, rather than clearly stating that stranding parameters are not available in the reachable data.",
+  "reason": "The use case cannot be delivered without RPM, lay length, or historical/process data, but the explanation of the data gap was misleading and the example calculation did not answer the item-specific question."
+ },
+ {
+  "id": "N065",
+  "result": "fail",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant correctly did not produce a job-specific estimate, but it introduced an unsupported generic speed range of 10–30 m/min. It also did not clearly state that laying-up speed or capability data is absent from the reachable MES view.",
+  "reason": "The speculative speed range violates the requirement not to invent a cabling speed, even though the required underlying machine and historical data are unavailable."
+ },
+ {
+  "id": "N066",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The answer correctly read the job details and calculated the schedule-implied rate of 18.75 m/h, with its assumptions stated. However, it did not provide a genuine speed prediction, uncertainty, operating conditions, or historical comparison, and it added an unsupported 10% downtime recommendation.",
+  "reason": "The schedule arithmetic was useful and mostly transparent, but presenting 20–20.8 m/h as a nominal machine-speed plan goes beyond the available MES evidence."
+ },
+ {
+  "id": "N067",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly listed the three matching jobs and clearly distinguished their planned rates from verified screening speeds. It did not provide a screening-speed prediction, uncertainty, operating conditions, or historical comparison because that data is not available.",
+  "reason": "The response was honest and grounded, but the reachable data cannot support the prediction required by this use case."
+ },
+ {
+  "id": "N068",
+  "result": "fail",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The answer identified the planned length, machine, and job, but calculated the duration and speed incorrectly. It also omitted the expected source linkage, detected gaps, and clear next action.",
+  "reason": "The plan is 100 m over about 72 minutes, implying roughly 83.3 m/hour—not 1.2 minutes or 83.3 m/min—and the response presents this incorrect calculation as the planned speed."
+ },
+ {
+  "id": "N069",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The response identified the available job information and did not fabricate a sheathing speed. It explained that the displayed rate was only a conditional, schedule-based armouring throughput, not an actual line speed.",
+  "reason": "MES data available to the assistant contains no sheathing line-speed, machine, or process data, so the requested estimate cannot be delivered; the response remained grounded and appropriately qualified its arithmetic."
+ },
+ {
+  "id": "N070",
+  "result": "fail",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The system identified the job, operation, planned time window, and status, but reported the duration as 2.5 hours. The supported planned duration is 69 minutes (about 1 hour 9 minutes) for quantity 30.",
+  "reason": "Its duration calculation is incorrect and it did not provide the required accurate, reviewable planned runtime."
+ },
+ {
+  "id": "N071",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant gave a planned total of 521 hours 34 minutes (521.57 hours) and said it covered 67 jobs on Ext-S-3. However, it did not show the job-level source data, the calculation, whether any job times were missing, or a next action.",
+  "reason": "The headline result may be correct, but the response is not sufficiently structured or reviewable to verify the total and does not address the required gap check."
+ },
+ {
+  "id": "N072",
+  "result": "fail",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant correctly identified the next jobs and noted that historical setup/changeover durations were unavailable, but it invented specific changeover, preparation, and combined-time estimates. It also did not clearly state that the MES view contains no setup or changeover records.",
+  "reason": "The prompt explicitly required no invented duration, while the answer presented unsupported numerical predictions despite lacking recipes, machine data, or setup records."
+ },
+ {
+  "id": "N073",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant correctly reported that ARM-S-10 has 99 jobs, found no completed or in-progress jobs, and did not invent actual durations. It provided a limited planned-time summary, but not the structured job-by-job comparison, source links, or a clear next action requested by the use case.",
+  "reason": "The response was grounded and honest about the missing actual-duration data, but it delivered only part of the requested reviewable comparison."
+ },
+ {
+  "id": "N074",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant used current MES workload and queue data to identify ARM-1 as the strongest bottleneck candidate, and clearly stated that this was not proven by machine-rate or throughput history. It did not deliver a true predictive bottleneck classification with confidence or historical comparison.",
+  "reason": "The assessment was grounded and honest, but the available data supports only a workload-based proxy, not the full prediction use case."
+ },
+ {
+  "id": "N075",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The system listed the six scheduled Ext-S-2 jobs and correctly totaled their planned runtime as 23 hours 39 minutes. It did not provide a utilization percentage because the available-capacity calendar was not available, and it clearly stated that limitation.",
+  "reason": "It was grounded and honest, but the planned utilization value or risk classification could not be delivered without a capacity assumption or calendar."
+ },
+ {
+  "id": "N076",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The answer correctly identifies that the available records contain no line-speed, throughput, scrap, or quality-test data, and it shows the one ready job. However, it still recommends keeping the planned speed and releasing POT5248 under normal settings, which is an unsupported operational recommendation given those gaps.",
+  "reason": "The required optimization cannot be delivered without quality and speed data, and the response goes beyond the evidence by advising normal-speed production."
+ },
+ {
+  "id": "N077",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant did not choose a die and correctly explained that approved die inventory and the verified sheath diameter were unavailable in the accessible records. It also requested an approved die list or die-store information rather than inventing a tooling recommendation.",
+  "reason": "The required die inventory and tooling-selection data are outside the system’s available MES and design data, so the use case cannot be delivered for this prompt."
+ },
+ {
+  "id": "N078",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly declined to select an extrusion tip because the available records do not contain tip or tooling specifications. It usefully showed the two matching Ext-S-4 jobs and directed the user to the appropriate setup documentation.",
+  "reason": "The required approved tooling data is outside the system’s available data, and the response did not invent a tip or dimension."
+ },
+ {
+  "id": "N079",
+  "result": "fail",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant produced specific die dimensions even though the available MES data did not contain the required cable geometry, compound, or draw-ratio inputs. It should have refused the calculation, identified the missing inputs, and limited its response to the verified job information.",
+  "reason": "It presented assumed construction values and a recommended 22.5 mm die as a candidate setting, which violates the explicit requirement not to produce die dimensions and is not grounded in approved recipe or reachable design data."
+ },
+ {
+  "id": "N080",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly declined to produce tip dimensions and explained that key design geometry was unavailable. It identified conductor diameter and insulation thickness as needed inputs, but the required approved recipe and tooling constraints are also outside the available MES view.",
+  "reason": "The use case cannot be delivered from the reachable data because the necessary geometry, recipe, and tooling inputs are unavailable, although the response was honest and did not invent dimensions."
+ },
+ {
+  "id": "N081",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly identified the current job and explained that it could not evaluate the drawdown ratio because tooling dimensions and product geometry were unavailable. It did not state a drawdown ratio and clearly identified the required missing dimensions.",
+  "reason": "The use case cannot be delivered with the available data, but the response was honest, grounded, and aligned with the required refusal."
+ },
+ {
+  "id": "N082",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant did not provide a draw-balance verdict and reported that it could not find a matching design or reach the DesignCenter data service. This is consistent with being unable to access the layer and tooling dimensions needed for the assessment.",
+  "reason": "The required design and tooling data were not available through the attempted access, and the assistant did not invent a balance conclusion."
+ },
+ {
+  "id": "N083",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant did not recommend pressure or tubing tooling, but it also did not explain that the MES has no validated tooling-method data for PO007700_1. It suggested that a DesignCenter search could determine the method, which is not supported by the available data and tools.",
+  "reason": "The required approved, validated tooling-method information is not available, and the response omitted that limitation while implying a retry could establish the answer."
+ },
+ {
+  "id": "N084",
+  "result": "fail",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The answer correctly identified that key compound and process details were unavailable, but it then supplied a die-swell range and a specific 1.08 estimate. The requested case explicitly required no die-swell figure and a clear statement that compound properties and process history were unavailable.",
+  "reason": "The numerical estimate is unsupported by the available data and violates the case-specific requirement not to give a die-swell figure."
+ },
+ {
+  "id": "N085",
+  "result": "fail",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant asked for a die ID and implied it could verify compatibility with the Ext-S-4 crosshead. It did not explain that die, crosshead, and machine-tooling data are unavailable.",
+  "reason": "The requested compatibility check cannot be performed from the available data, and the response misleadingly suggested that supplying a part number would enable verification."
+ },
+ {
+  "id": "N086",
+  "result": "fail",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant identified the production job but did not answer whether a reusable die is in stock. It incorrectly suggested that a die-stock lookup could be performed if a die code and location were provided, even though no tooling inventory is available.",
+  "reason": "It should have clearly explained that the reachable MES data does not include die or tooling inventory, rather than requesting details for an unavailable lookup."
+ },
+ {
+  "id": "N087",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant accurately explained that the available MES data has no die or tooling information and that it cannot change job sequence. It offered item-based grouping only as a clearly labelled proxy and reported the available job details.",
+  "reason": "Die-change optimization requires machine/tooling data and schedule-write capability that are not available, and the assistant did not invent either."
+ },
+ {
+  "id": "N088",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly stated that no die inspection records or trend measurements were available and did not name any dies or assign wear levels. It explained what information would be needed to make a prediction.",
+  "reason": "Die-wear prediction requires inspection-trend data that is not available in the reachable plant data, so the use case could not be delivered and the refusal was accurate."
+ },
+ {
+  "id": "N089",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly declined to provide a price and explained that the available records do not contain die or related replacement-cost data. It provided the accessible job details for PO007713_1 and identified the missing cost inputs.",
+  "reason": "The requested tooling cost cannot be estimated from the data available to the assistant, and the response was honest and grounded about that limitation."
+ },
+ {
+  "id": "N090",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant did not provide a stock recommendation and correctly avoided naming specific dies or quantities. However, it redirected the question to DesignCenter design frequency instead of explaining that actual die usage and inventory data are not available in the MES view.",
+  "reason": "It was honest that the DesignCenter service was unavailable, but it did not accurately identify the relevant data limitation and implied that design-frequency analysis could support stock recommendations."
+ },
+ {
+  "id": "N102",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The answer correctly states that planned and actual cost data are unavailable, and it reports quantity and job-status facts. However, it adds unsupported conclusions that the job has not started, has produced nothing, and has no material allocated, and it does not provide an actual-versus-planned cost comparison.",
+  "reason": "The reachable MES data does not contain the cost fields required by the use case, while several operational claims were not supported by the successful data access described."
+ },
+ {
+  "id": "N106",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant correctly explained that the available data cannot provide a certified machine-capability list and avoided inventing eligibility rules. However, it did not check the item’s planned jobs or name ARM-1, which the prompt specifically required.",
+  "reason": "It was honest about the limitation but failed to use the available production-job data to report where ARMCUXNWT-2 is scheduled."
+ },
+ {
+  "id": "N107",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly read and reported the job details, but it did not—and could not—validate the fit because the available MES view lacks the machine limits and cable/reel measurements required for the check.",
+  "reason": "It explicitly avoided a fit verdict and clearly identified the missing reel, diameter, weight, tension, and process-limit data, while accurately stating that assignment to ARM-1 does not prove compatibility."
+ },
+ {
+  "id": "N108",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant did not provide machine settings, correctly reported that no matching non-archived jobs were found, and explained that the available MES data does not contain archived jobs or settings/approval history.",
+  "reason": "Historical approved machine settings are not available through the system’s reachable data, and the response was honest about that limitation without inventing settings."
+ },
+ {
+  "id": "N109",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant did not confirm tooling availability and correctly reported that the job record lacks die, tip, and tooling IDs. However, it implied that supplying IDs and a storage location would enable a stock check, although tooling inventory is not available through the system.",
+  "reason": "The required tooling-stock data is outside the system’s reach, and the suggested next step misleadingly implies it could check that inventory."
+ },
+ {
+  "id": "N110",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly refused to invent a feasibility score because it could not identify the item in DesignCenter or the MES data it checked. It requested a DesignCenter design code, but the available data does not include the machine and process information needed to assess technical manufacturability.",
+  "reason": "The required capability and supporting machine/process data are not available within the system’s reach, although the response was honest and appropriately cautious."
+ },
+ {
+  "id": "N111",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly displayed the job’s accessible details but did not provide temperatures. It clearly stated that approved zone temperatures were not available in the accessible records.",
+  "reason": "Approved recipes and setpoints are outside the assistant’s available MES and design data, so the proposed use case cannot be delivered for this prompt."
+ },
+ {
+  "id": "N112",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant did not provide barrel temperatures and clearly explained that approved machine-parameter data is not available in the reachable systems. It correctly identified that the available records cover production and inventory rather than extruder settings.",
+  "reason": "The required approved setpoints do not exist within the assistant’s accessible data, and the response was honest about that limitation."
+ },
+ {
+  "id": "N113",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly said that crosshead and adapter temperature settings are not available in the accessible job details and did not invent temperature targets. It provided supported MES context by identifying the six jobs and the current in-process job.",
+  "reason": "The required approved temperature recipes or machine-specific setpoints are not available through the reachable data, so the use case cannot be delivered for this prompt."
+ },
+ {
+  "id": "N114",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant identified the relevant job and accurately stated that the available MES record does not contain an approved die-zone setpoint. It did not provide a setpoint, as required by the case-specific check.",
+  "reason": "Approved die-zone settings are not available in the reachable plant data, so the proposed use case cannot be delivered for this prompt; the response was honest and appropriately grounded."
+ },
+ {
+  "id": "N115",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly explained that it cannot predict the actual melt temperature or provide limits because the available MES data contains no temperature readings, setpoints, or limits. It also accurately noted that multiple jobs and materials are present on Ext-S-3, without inventing a temperature.",
+  "reason": "The required machine-temperature data and prediction capability are not available, and the assistant appropriately refused to provide unsupported values."
+ },
+ {
+  "id": "N116",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant appropriately asked for the current process readings and material details and did not present any unvalidated temperature changes as approved. However, it did not clearly state that no validated Ext-S-4 profiles or supporting process data are available.",
+  "reason": "It avoided inventing settings but failed to explicitly explain that validated adjustments cannot be proposed from the available data."
+ },
+ {
+  "id": "N117",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly reported the available job information and refused to select a supplier-specific recipe because the compound grade and recipe are not present in the accessible MES data.",
+  "reason": "The requested recipe selection requires compound supplier-grade and approved recipe data that this system cannot access, and the assistant did not invent either."
+ },
+ {
+  "id": "N118",
+  "result": "fail",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant named a recipe, cable construction, machine assignment, and matching jobs, despite the available data not supporting extruder configuration or recipe matching. It should have said that this information is not available and offered only the MES information it could substantiate.",
+  "reason": "It violated the explicit requirement not to name a recipe or configuration and presented unsupported MES findings as facts."
+ },
+ {
+  "id": "N119",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant did not provide an RPM and clearly stated that validated capacity and operating limits for Ext-S-3 could not be verified. It asked for the missing validated range or the correct design record before making a recommendation.",
+  "reason": "The required validated screw-capacity data is not available through the reachable DesignCenter data, so the use case cannot be delivered for this prompt, but the response was honest and appropriately cautious."
+ },
+ {
+  "id": "N120",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant correctly declined to provide a melt-pressure value or abnormality risk because the available data lacks pressure measurements and prediction models. However, it made unsupported claims about the active job, its status and quantities, and inferred process concern from the good-versus-completed amounts.",
+  "reason": "The use case cannot be delivered with the available systems, but the answer included MES facts and a quality-process interpretation not established by the successful data access."
+ },
+ {
+  "id": "N121",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The response correctly did not calculate residence time or assign a definitive overheating risk, and it identified the missing screw, throughput, hold-up, and temperature data. However, it also stated that the job had zero scrap/error, which is not supported by the available record.",
+  "reason": "The requested calculation cannot be delivered from the reachable data, and the unsupported zero-scrap claim makes the response factually flawed."
+ },
+ {
+  "id": "N122",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant did not provide a temperature, and it honestly said it could not verify one. However, cooling-water conditions are not available in the accessible MES view, and the response did not clearly explain that limitation.",
+  "reason": "The required cooling data and approved recipes are outside the system’s available data, so this use case cannot be delivered for this prompt."
+ },
+ {
+  "id": "N123",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The answer accurately reports available job details, clearly identifies missing cooling-design inputs, and offers general engineering guidance without claiming that plant data selected the arrangement. However, it does not provide the structured, reviewable DesignCenter result, linked source data, or a clear next action required by the use case.",
+  "reason": "The response is honest and appropriately cautious, but it only partially delivers the requested cooling-configuration review."
+ },
+ {
+  "id": "N124",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant accurately reported the reachable production-order and job details, but did not prepare a startup sequence because no SOP was available. It clearly identified the missing source and requested the relevant SOP sections rather than presenting invented plant instructions.",
+  "reason": "The use case depends on an SOP that was not available to the system, so a grounded sequence could not be delivered; the response was honest and supported by the available records."
+ },
+ {
+  "id": "N125",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant correctly identified PO007713_1 on Ext-S-4 and reported its MES details. It did not prepare changeover instructions or explain that approved recipes, SOPs, and machine-specific process data are unavailable, but it avoided inventing procedural steps and appropriately flagged uncertainty about the preceding job.",
+  "reason": "It provided useful MES facts and a valid clarification request, but did not deliver even a clearly labelled, engineering-review changeover checklist or explicitly state the recipe/SOP limitation."
+ },
+ {
+  "id": "N126",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly showed the job running on Ext-S-3 and did not invent RPM, speed, pressure, or temperature settings. It clearly explained that the available data does not include the machine readings or setpoints needed to balance those parameters.",
+  "reason": "The requested optimization cannot be delivered because the required process-parameter data and capability are not available, while the response remained accurate and appropriately cautious."
+ },
+ {
+  "id": "N127",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly explained that neither the approved recipe setpoints nor actual setpoints are available, so it could not determine whether PO007700_1 deviated. It provided available job information without claiming a deviation or its absence.",
+  "reason": "The use case requires recipe and machine-setpoint data that this system cannot access, and the response was honest and grounded about that limitation."
+ },
+ {
+  "id": "N128",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly explained that the accessible MES data does not include thermal profiles, defect classifications, or laboratory results, so it did not claim a correlation. It provided the available production figures and identified the reconciliation gap.",
+  "reason": "The requested temperature-quality correlation cannot be delivered because the required machine and quality data are outside the system’s available view."
+ },
+ {
+  "id": "N129",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly did not invent a recipe revision or describe changes. It explained that recipe revisions and change history are not available in the accessible manufacturing data.",
+  "reason": "The use case requires approved recipe-version data that this system cannot access, and the response was honest about that limitation."
+ },
+ {
+  "id": "N130",
+  "result": "fail",
+  "delivery": "not supported",
+  "behaviour": "flawed",
+  "summary": "The assistant did not summarize any changes and did not clearly state that recipe or approval data is unavailable. Instead, it redirected the user to clarify whether Ext-S-4 was a DesignCenter item or plant.",
+  "reason": "Because it implied clarification might enable the requested summary, rather than honestly explaining that pending recipe approvals are not available in the reachable data, it failed the required response."
+ },
+ {
+  "id": "N131",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant used the job’s available facts and provided a general sheathing checklist, but it did not and could not produce machine/material-specific instructions from an approved recipe. It appropriately avoided inventing settings and indicated that recipe and process values must come from controlled shop-floor information.",
+  "reason": "The required approved recipe, machine settings, and engineering-review workflow are not available in the reachable data, so the use case could not be delivered for this job."
+ },
+ {
+  "id": "N132",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly declined to provide an authorized setup procedure because none was available in the reachable records. It usefully showed the jobs associated with the machine and asked for a job/product or approved work instruction.",
+  "reason": "The required approved, machine-specific setup instructions are not available to the system, and it did not invent any steps."
+ },
+ {
+  "id": "N133",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant accurately reported the available order and job details and clearly stated that approved drying, handling, and feeding instructions were not present. It did not invent compound-specific settings or procedures.",
+  "reason": "The required approved material-preparation data and machine-specific instructions are unavailable in the connected systems, so the use case cannot be delivered for this prompt."
+ },
+ {
+  "id": "N134",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant explicitly said that no machine-specific tooling procedure or stored checklist was available and clearly labelled its content as a generic checklist. It did not provide approved recipe-based settings for Ext-S-2, which this use case requires.",
+  "reason": "The reachable data contains no approved machine recipes or tooling/process information from which a machine-specific checklist could be prepared, but the assistant was honest and did not present the generic checklist as the plant’s procedure."
+ },
+ {
+  "id": "N135",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant correctly reported that it could not find a matching DesignCenter design or cable code and requested the correct identifier or permission to use a general checklist. It did not provide the requested checks or explicitly state that no approved pre-start checks are available.",
+  "reason": "The response was grounded and honest, but it only identified the gap and next action rather than delivering the structured checklist result required."
+ },
+ {
+  "id": "N136",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant produced a useful sheet containing supported MES job facts and left out all unsupported process parameter values. It clearly stated that zones, speed, pressure, and tension were unavailable, but did not provide the requested linked source data, detected-gaps section, or a clear next action.",
+  "reason": "It correctly handled the unavailable process data, but delivered only part of the structured, reviewable sheet described by the use case."
+ },
+ {
+  "id": "N137",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly identified the job and explained that no approved first-off inspection checklist, limits, or machine settings were available. It offered clearly labelled generic checks without presenting them as approved instructions.",
+  "reason": "The required approved recipe-based inspection plan is not available in the reachable data, so the use case could not be delivered, but the response was honest and appropriately cautious."
+ },
+ {
+  "id": "N138",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant clearly said that Ext-S-3-specific alarm limits and approved monitoring frequencies were unavailable, and labeled its checklist as general guidance. It did not present the generic cadence or alarm conditions as verified plant facts.",
+  "reason": "The required machine-specific instructions sourced from approved recipes cannot be delivered because that recipe, alarm, and process-monitoring data is not available."
+ },
+ {
+  "id": "N139",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The assistant correctly reported the job’s available MES status and clearly stated that no measurements, scrap, or process data exist to confirm the diameter drift. It provided sensible next checks, but could not retrieve the DesignCenter design and therefore did not deliver a complete, design-linked investigation.",
+  "reason": "It was honest and grounded about the missing data, but the unavailable design information prevented a full troubleshooting result with verified dimensions or cause."
+ },
+ {
+  "id": "N140",
+  "result": "partial",
+  "delivery": "partly",
+  "behaviour": "flawed",
+  "summary": "The assistant identified the current and next Ext-S-3 jobs and their lots, then provided a useful general changeover checklist. However, it did not state that no approved changeover procedure, recipe, machine settings, or tooling data was available, and it presented the general checklist without clearly labelling it as such.",
+  "reason": "It partially delivered an MES-grounded job transition checklist, but missed the required limitation and could mislead users into treating generic steps as an approved plant procedure."
+ },
+ {
+  "id": "N141",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant did not provide a shutdown or purging procedure and correctly stated that it could not retrieve one for Ext-S-4. It asked for a document number, site, or the approved procedure so it could be checked.",
+  "reason": "The required controlled procedure is not available through the reachable data, and the assistant did not invent or label an unverified procedure as approved or safe."
+ },
+ {
+  "id": "N142",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant did not invent the operator’s role or permissions and clearly limited its response to general, safety-oriented guidance. It provided a useful workflow and a next-step question, but could not tailor instructions to the user’s actual role or permissions because that data was unavailable.",
+  "reason": "The required role- and permission-specific guidance could not be delivered without accessible operator account data, and the assistant was honest about that limitation."
+ },
+ {
+  "id": "N143",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly reported the available production-order details, stated that approved operator-instruction text was not available, and offered to translate text supplied by the user.",
+  "reason": "The requested source instructions were not accessible, so translation could not be delivered, but the assistant did not fabricate them and handled the limitation honestly."
+ },
+ {
+  "id": "N144",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant correctly stated that operator acknowledgement records are not available in the accessible MES data and did not list any operators or acknowledgements. It provided only the available job details as context.",
+  "reason": "The requested acknowledgement data and tracking capability are outside the system’s available data, so the use case cannot be delivered for this prompt, but the response was honest and grounded."
+ },
+ {
+  "id": "N145",
+  "result": "pass",
+  "delivery": "partly",
+  "behaviour": "correct",
+  "summary": "The answer correctly declined to compare recipe targets or actual process values, explicitly stating that those data are unavailable. It provided a useful, clearly labelled comparison of planned, completed, and good quantities for the six Ext-S-2 jobs.",
+  "reason": "It follows the case-specific requirement not to compare recipe values while accurately presenting the MES quantity data, but the full recipe-to-production feedback use case cannot be delivered because approved recipes and process measurements are unavailable."
+ },
+ {
+  "id": "SU013",
+  "result": "not supported",
+  "delivery": "not supported",
+  "behaviour": "correct",
+  "summary": "The assistant accurately reported the available job details and clearly stated that it could not access the indication sheet or the zone-temperature and run-setting values. It requested the missing sheet so the mapping could be performed.",
+  "reason": "The required indication-sheet and machine-parameter data are not available to the assistant, so the mapping cannot be delivered, but the response was honest and grounded."
+ }
+]
