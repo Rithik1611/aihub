@@ -87,8 +87,6 @@ A new app is a new folder in `apps/` exposing `instructions(ctx)`, `tools()` and
 | `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_USE_SSL`, `MINIO_USER_NAME`, `MINIO_PASSWORD`, `MINIO_BUCKET` | —, 9000, false, —, —, `ai-chat-files` | backend: chat uploads in cableCORE's MinIO (same values as cableCORE_BE's app config); empty endpoint = text only |
 | `TOOL_SEARCH` | off | sandbox and web tools hidden until the model finds them with the Responses API tool search |
 | `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` | off | LangSmith tracing of every model call. Sends chat content to LangSmith: use a self-hosted endpoint or clear it first |
-| `LANGFUSE_TRACING`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | off | Langfuse tracing (self-hosted): one trace per chat turn, session = chat, every model call nested under it. Traces contain chat content |
-| `LANGFUSE_SAMPLE_RATE` | `1.0` | share of chat turns traced (read by the Langfuse SDK). Tracing a turn costs CPU (about a fifth of aihub's under load): keep 1.0 in development, use e.g. `0.1` in production. Untraced turns also skip the OpenAI SDK's re-encoding of the conversation (`loop._body`) |
 
 All are declared and validated in [settings.py](settings.py).
 
@@ -108,7 +106,7 @@ notes, and one line per skill. Everything else is disclosed when the model asks 
   (valid JSON), and on zero matches says how many each filter matches alone and which field names do not exist.
 
 Measure a change with the eval runner plus `evals/scoreboard.py` (steps, tool calls, uncached/cached tokens,
-time, grade per case, read from Langfuse).
+time, grade per case, from the usage each turn records in the runner's results file).
 
 ## Per-turn context, access, files, memory
 

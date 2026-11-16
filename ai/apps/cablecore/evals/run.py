@@ -18,8 +18,8 @@ import time
 import aiohttp
 
 from ai import TurnContext, http, run_turn, sandbox, user_message
-from ai.context import Answer, ApprovalCard, Card, Error, Items, TextDelta
 from ai.apps.cablecore import api
+from ai.context import Answer, ApprovalCard, Card, Done, Error, Items, TextDelta
 
 HERE = pathlib.Path(__file__).parent
 FILES = pathlib.Path(os.getenv('EVAL_FILES', 'C:/DDM/ai-demo-files'))
@@ -68,7 +68,7 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
                 path = await sandbox.save_file(case['file'], (FILES / case['file']).read_bytes(), 'application/octet-stream', ctx.user_id, folder='uploads')
                 attachment = (case['file'], path)
             message = user_message(prompt, attachment, case.get('page', '/design'))
-            t0, first_token, answered, error, items = time.time(), None, None, None, []  # answered: last streamed text
+            t0, first_token, answered, error, items, usage = time.time(), None, None, None, [], {}  # answered: last streamed text
             async for e in run_turn(ctx, history, message):
                 if isinstance(e, TextDelta):
                     first_token = first_token or time.time() - t0
@@ -77,12 +77,14 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
                     error = e.message
                 elif isinstance(e, Items):
                     items = e.items
+                elif isinstance(e, Done):
+                    usage = e.usage
             history += items
             text, calls = summarize(items)
             latency = time.time() - t0
             turns.append({'prompt': prompt, 'latency_s': round(latency, 1), 'answer_s': round(answered or latency, 1), 'checked': True,
                           'first_token_s': round(first_token, 1) if first_token else None, 'error': error, 'answer': text,
-                          'tools': calls, 'confirmations': confirms})
+                          'tools': calls, 'confirmations': confirms, 'usage': usage})
             print(f"{case['id']} {latency:.1f}s tools={len(calls)} err={error}", flush=True)
         return {'id': case['id'], 'group': case.get('group'), 'chat_id': f"eval-{case['id']}", 'turns': turns}
 

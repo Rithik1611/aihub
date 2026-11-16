@@ -12,10 +12,9 @@ import os
 from dataclasses import replace
 from typing import AsyncIterator
 
-from opentelemetry import trace
-
 from ai import apps, ask_user, http, memory, sandbox, web
 from ai.context import Event, TurnContext
+from ai.settings import settings
 from ai.tools import Tool, run, tool
 
 log = logging.getLogger(__name__)
@@ -95,8 +94,8 @@ async def _drain(task: asyncio.Task, queue: asyncio.Queue) -> AsyncIterator[Even
 def _body(input_items: list[dict], specs: list[dict]) -> dict:
     """The conversation and tool list for a model call. The OpenAI SDK walks every item of `input`/`tools` to convert
     types before sending (the second biggest CPU cost under load); `extra_body` is sent as it is, so it is used
-    unless this call is traced, where Langfuse reads `input` from the arguments to record the prompt."""
-    if trace.get_current_span().is_recording():
+    unless LangSmith tracing is on, which reads `input` from the arguments to record the prompt."""
+    if settings().langsmith_tracing:
         return {'input': input_items, 'tools': specs}
     return {'extra_body': {'input': input_items, 'tools': specs}}
 
@@ -130,11 +129,20 @@ async def agent(ctx: TurnContext, instructions: str, items: list[dict], tools: d
         if response.usage:
             usage['input_tokens'] = usage.get('input_tokens', 0) + response.usage.input_tokens
             usage['output_tokens'] = usage.get('output_tokens', 0) + response.usage.output_tokens
+            # Per-turn cost, kept locally (the eval runner records it per case): cached input is re-sent prefix.
+            usage['cached_tokens'] = usage.get('cached_tokens', 0) + (
+                getattr(getattr(response.usage, 'input_tokens_details', None), 'cached_tokens', 0) or 0)
+            usage['reasoning_tokens'] = usage.get('reasoning_tokens', 0) + (
+                getattr(getattr(response.usage, 'output_tokens_details', None), 'reasoning_tokens', 0) or 0)
             if response.usage.input_tokens > COMPACT_AT_TOKENS:
                 compact(items)
         output = [o.model_dump(exclude_none=True) for o in response.output]
         items += output
         calls = [o for o in output if o['type'] == 'function_call']
+        usage['steps'] = usage.get('steps', 0) + 1
+        usage['tool_calls'] = usage.get('tool_calls', 0) + len(calls)
+        usage['skills'] = usage.get('skills', 0) + sum(1 for c in calls if c.get('name') == 'load_skill')
+        usage['searches'] = usage.get('searches', 0) + sum(1 for o in output if o['type'] == 'tool_search_call')
         if not calls:
             return
 
