@@ -1,0 +1,88 @@
+# cableAI (aihub) - one file for the whole stack.
+#
+#   docker compose up -d --build    aihub + sandbox + code search
+#   docker compose down              stop (volumes are kept)
+#
+# Secrets and settings come from .env (never written here). Besides the app's own keys,
+# .env needs for this file:
+#   DOCKER_DATABASE_URL   aihub's Postgres as seen from a container, e.g.
+#                         postgresql+asyncpg://postgres:<pw>@host.docker.internal:5432/CableAI
+#
+# cableCORE (backend :5000, its Postgres, its MinIO) runs outside this file; containers
+# reach it through host.docker.internal. Inside, services call each other by name.
+#
+# Code search: build the index first (it lands in ./.code_index):
+#   uv run python -m ai.apps.cablecore.code ../cableCORE_BE ../cableCORE_FE
+
+name: cableai
+
+x-host: &host
+  extra_hosts:
+    - host.docker.internal:host-gateway
+
+services:
+  aihub:
+    build: .
+    image: cableai-aihub:latest
+    <<: *host
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DOCKER_DATABASE_URL:?set DOCKER_DATABASE_URL in .env (aihub DB via host.docker.internal)}
+      CC_API_URL: ${DOCKER_CC_API_URL:-http://host.docker.internal:5000}
+      MINIO_ENDPOINT: ${DOCKER_MINIO_ENDPOINT:-host.docker.internal}
+      CC_TERMINAL_URL: http://sandbox:8000
+      ZOEKT_URL: http://zoekt:6070
+      # Learned app notes outlive the container (one aihub replica; see the notes module).
+      CC_NOTES_FILE: /data/app_notes.md
+    volumes:
+      - aihub-data:/data
+    ports:
+      - ${AIHUB_PORT:-127.0.0.1:8000}:8000
+    depends_on:
+      sandbox:
+        condition: service_started
+      zoekt:
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # The model's code-run sandbox: one Linux user per chat user, no database login.
+  sandbox:
+    build: ./ai/apps/cablecore/sandbox
+    image: cablecore-sandbox:latest
+    restart: unless-stopped
+    environment:
+      OPEN_TERMINAL_API_KEY: ${OPEN_TERMINAL_API_KEY:?set OPEN_TERMINAL_API_KEY in .env}
+      OPEN_TERMINAL_MULTI_USER: 'true'
+      CC_API_BASE: http://aihub:8000/api/cablecore/api
+      CC_ROWS_URL: http://aihub:8000/api/cablecore/rows
+      ZOEKT_URL: http://zoekt:6070
+      PYTHONPATH: /opt/cablecore
+    volumes:
+      - sandbox-homes:/home
+      - ${CC_SCHEMA_DIR:-../cableCORE_BE/prisma/models}:/opt/cablecore/schema:ro
+      - ./ai/apps/cablecore/sandbox/README.md:/opt/cablecore/README.md:ro
+      - ./ai/apps/cablecore/sandbox/cc.py:/opt/cablecore/cc.py:ro
+    ports:
+      - ${SANDBOX_PORT:-127.0.0.1:8070}:8000
+
+  # Code search over the FE/BE source; reloads index shards when they change.
+  zoekt:
+    image: ${ZOEKT_IMAGE:-ghcr.io/sourcegraph/zoekt:latest}
+    restart: unless-stopped
+    entrypoint: ['zoekt-webserver']
+    command: ['-index', '/data/index', '-rpc', '-listen', ':6070']
+    volumes:
+      - ./.code_index:/data/index:ro
+    ports:
+      - ${ZOEKT_PORT:-127.0.0.1:6070}:6070
+
+volumes:
+  aihub-data:
+  sandbox-homes:
+    name: cablecore-sandbox-homes  # the volume start-sandbox.sh already uses

@@ -1,0 +1,15 @@
+.env
+.env.*
+.venv
+.git
+.code_index
+**/__pycache__
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+tests
+backend/tests
+ai/apps/cablecore/evals
+graphify-out
+.vscode
+compact2.json
