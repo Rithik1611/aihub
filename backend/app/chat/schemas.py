@@ -43,6 +43,14 @@ class TaskStatus(StrEnum):
     FAILED = "failed"
 
 
+class TaskKind(StrEnum):
+    """Which section of the thinking trace a task row belongs to."""
+
+    STEP = "step"
+    SEARCH = "search"
+    CODING = "coding"
+
+
 class QuestionType(StrEnum):
     RADIO = "radio"
     CHECK = "check"
@@ -90,6 +98,7 @@ class ChatTask(_Payload):
     label: str = ""
     amount: str = ""
     status: TaskStatus = TaskStatus.DONE
+    kind: TaskKind = TaskKind.STEP
     details: list[TaskDetail] = Field(default_factory=list)
 
 
@@ -101,6 +110,13 @@ class ChatQuestion(_Payload):
     options: list[str] = Field(default_factory=list)
     # A short explanation under each option, same order (the frontend card shows it).
     descriptions: list[str] = Field(default_factory=list)
+
+
+class ChatAnswer(_Payload):
+    """One answer the user gave on a question card, kept so the chat shows it as answers, not as a message."""
+
+    q: Annotated[str, Field(max_length=1000)] = ""
+    a: Annotated[str, Field(max_length=2000)] = ""
 
 
 class ChatAttachment(_Payload):
@@ -120,6 +136,8 @@ class ChatMessageMetadata(_Payload):
     question_lead: str | None = None
     stopped: bool | None = None
     complete: bool | None = None
+    # On a human message that answered a question card.
+    answers: list[ChatAnswer] | None = None
 
 
 class AiResponsePayload(_Payload):
@@ -144,6 +162,8 @@ class SendMessage(_Request):
     mode: ChatMode = ChatMode.DEFAULT
     # The DesignCenter page the user is on (path and query), so "this design" resolves.
     page: Annotated[str, Field(max_length=500)] = ""
+    # Set when the message answers a question card (the message holds the same answers as text).
+    answers: Annotated[list[ChatAnswer], Field(max_length=20)] | None = None
 
 
 class UpdateSessionName(_Request):

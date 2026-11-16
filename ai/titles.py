@@ -27,7 +27,7 @@ async def make_title(user_text: str, reply: str) -> str:
     """Falls back to the start of the user's message when the model call fails."""
     fallback = ' '.join(user_text.split()[:6])[:60] or 'New chat'
     try:
-        out = await structured(Title).ainvoke(PROMPT % (user_text[:2000], reply[:2000]))
+        out = await structured(Title, 'housekeeping').ainvoke(PROMPT % (user_text[:2000], reply[:2000]))
         return out.title.strip()[:80] or fallback
     except Exception:
         return fallback

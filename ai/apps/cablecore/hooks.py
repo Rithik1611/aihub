@@ -1,17 +1,17 @@
 """After a turn: a reply that changed data is checked against what cc_action did and what the records
-now say; a reply that changed nothing is checked for covering the whole request. Findings come back as
-notes shown under the reply. A check never breaks a reply."""
+now say (inside the turn, as a note under the reply). A reply about DesignCenter data that changed nothing
+is checked for covering the whole request after the turn is done (`coverage`); its gaps go to a review
+pass. A check never breaks a reply."""
 
-import asyncio
 import logging
 import re
-from typing import Any
 
 from pydantic import BaseModel
 
 from ai import sandbox
 from ai.context import Event, TurnContext, WriteRecord
 from ai.langchain import structured
+from ai.settings import settings
 
 log = logging.getLogger(__name__)
 
@@ -101,16 +101,17 @@ async def _writes_check(request: str, reply: str, writes: list[WriteRecord]) -> 
     return {'type': 'check', 'kind': 'writes', 'note': note}
 
 
-async def _coverage_check(request: str, reply: str) -> Event | None:
+async def _coverage_check(request: str, reply: str, user_id: str) -> Event | None:
     try:
         attachment = ''
         if found := ATTACHED.search(request):
             try:
-                _, content, _ = await sandbox.read_file(found.group(1).strip())
+                _, content, _ = await sandbox.read_file(found.group(1).strip(), user_id)
                 attachment = f'\nThe attached file ({found.group(1).strip()}):\n{content.decode("utf-8", "replace")[:12000]}\n'
             except Exception:  # an unreadable (e.g. binary) file: judge from the request alone
                 pass
-        verdict = await structured(CoverageVerdict).ainvoke(
+        job = 'housekeeping' if settings().coverage_check_model == 'deepseek' else 'check'
+        verdict = await structured(CoverageVerdict, job).ainvoke(
             COVERAGE_PROMPT.format(request=request[:6000], attachment=attachment, reply=reply[:16000]))
     except Exception as e:
         log.warning(f'completeness check failed: {type(e).__name__}: {e}')
@@ -123,13 +124,18 @@ async def _coverage_check(request: str, reply: str) -> Event | None:
 
 
 async def after_turn(ctx: TurnContext, request: str, reply: str) -> list[Event]:
-    """Check events, as wire dicts like everything the loop yields."""
-    if not reply:
+    """The writes check, as wire dicts like everything the loop yields; part of the turn."""
+    if not reply or not ctx.writes:
         return []
+    found = await _writes_check(request, reply, ctx.writes)
+    return [found] if found else []
+
+
+async def coverage(ctx: TurnContext, request: str, reply: str, calls: list[str]) -> Event | None:
+    """Run after the turn is done: whether an answer about the user's DesignCenter data covers the whole
+    request. Answers from general knowledge (no cc_ tool read anything) and replies that changed data
+    (the writes check covers those) are not checked."""
     changed = any(w.status == 'done' and w.risk != 'read' for w in ctx.writes)
-    checks: list[Any] = []
-    if ctx.writes:
-        checks.append(_writes_check(request, reply, ctx.writes))
-    if not changed:
-        checks.append(_coverage_check(request, reply))
-    return [c for c in await asyncio.gather(*checks) if c]
+    if not reply or changed or not any(c.startswith('cc_') and c != 'cc_note' for c in calls):
+        return None
+    return await _coverage_check(request, reply, ctx.user_id)

@@ -12,8 +12,8 @@ tools    the model's cableCORE tools.  prompt  the system prompt.  hooks  the af
 """
 
 from ai.apps.cablecore.access import turn_context
-from ai.apps.cablecore.hooks import after_turn
+from ai.apps.cablecore.hooks import after_turn, coverage
 from ai.apps.cablecore.prompt import instructions
 from ai.apps.cablecore.tools import tools
 
-__all__ = ['after_turn', 'instructions', 'tools', 'turn_context']
+__all__ = ['after_turn', 'coverage', 'instructions', 'tools', 'turn_context']

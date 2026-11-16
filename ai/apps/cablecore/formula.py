@@ -23,7 +23,7 @@ TABLES = {
 LOOKUP_CALL = re.compile(r'cableCORE\.(\w*[Ll]ook[Uu]p\w*|getTableColumnContentByHeader|getColumnValuesByHeader|vlookupColumns)\(\s*([^,)]+)')
 MAX_TABLE_ROWS = 80
 MAX_FORMULA_CHARS = 6000
-MAX_CHARS = 30000
+MAX_CHARS = 12000  # every later step of the turn re-reads it; the cut parts say how to get them whole
 
 
 def _q(sql: str, *params: Any) -> list[dict]:

@@ -5,6 +5,7 @@ import io
 import ipaddress
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
@@ -17,8 +18,11 @@ from ai.context import TurnContext
 from ai.tools import tool
 
 RESULT_COUNT = 5
-# Tried in this order until one returns results (ddgs backend names). google answers long queries too.
-SEARCH_ENGINES = ('google', 'bing', 'brave', 'mojeek', 'yahoo', 'duckduckgo')
+# Asked at once (ddgs backend names); the first with results wins. These free engines are erratic from here
+# (each answers in ~1 s or times out), and asking them one after another cost 10-20 s per search. Brave, Mojeek
+# and DuckDuckGo return nothing from this network.
+SEARCH_ENGINES = ('google', 'bing', 'yahoo')
+ENGINE_TIMEOUT_S = 5
 SHORT_QUERY_WORDS = 6
 FETCH_MAX_CHARS = 50_000
 FETCH_MAX_BYTES = 30_000_000
@@ -30,7 +34,7 @@ async def search_web(ctx: TurnContext, query: str, count: int = RESULT_COUNT) ->
     Search the public web for information. Best for current events, external references,
     or topics not covered in internal documents.
 
-    :param query: The search query to look up
+    :param query: 3-6 key words (e.g. "LiHCH cable construction"); long keyword lists find nothing
     :param count: Number of results to return (default: admin-configured value)
     :return: JSON with search results containing title, link, and snippet for each result
     """
@@ -45,16 +49,23 @@ async def search_web(ctx: TurnContext, query: str, count: int = RESULT_COUNT) ->
 
 
 def _search(query: str, count: int) -> list[dict[str, str]]:
-    """The first engine that answers. Free engines block or throttle some networks (DuckDuckGo
-    challenges this one every time, Brave rate-limits), so they are tried in order, not at random."""
-    for backend in SEARCH_ENGINES:
+    """All engines at once; the first to return results.
+    ponytail: one thread per engine per search; a paid search API (one reliable call) when volume grows."""
+    def ask(backend: str) -> list[dict[str, str]]:
         try:
-            rows = DDGS().text(query, max_results=count, backend=backend, safesearch='moderate')
+            return DDGS(timeout=ENGINE_TIMEOUT_S).text(query, max_results=count, backend=backend, safesearch='moderate') or []
         except Exception:
-            continue
-        if rows:
-            return rows
-    return []
+            return []
+
+    pool = ThreadPoolExecutor(len(SEARCH_ENGINES))
+    try:
+        futures = [pool.submit(ask, b) for b in SEARCH_ENGINES]
+        for future in as_completed(futures):
+            if rows := future.result():
+                return rows
+        return []
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)  # slower engines finish on their own
 
 
 class _Text(HTMLParser):

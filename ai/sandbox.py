@@ -2,6 +2,9 @@
 
 The backend uses read_file / save_file for downloads and attachments (save_file(..., folder='uploads')
 then context.user_message(text, attachment=(name, path))).
+
+Every call carries the chat user's id (X-User-Id): the sandbox runs in multi-user mode, so each user has their
+own Linux account and home folder, and another user's files answer "Permission denied".
 """
 
 import json
@@ -28,24 +31,33 @@ class SandboxError(Exception):
     pass
 
 
-def _headers() -> dict:
-    return {'Authorization': f'Bearer {settings().open_terminal_api_key.get_secret_value()}'}
+def _headers(user_id: str = '') -> dict:
+    headers = {'Authorization': f'Bearer {settings().open_terminal_api_key.get_secret_value()}'}
+    return {**headers, 'X-User-Id': user_id} if user_id else headers
 
 
-async def read_file(path: str) -> tuple[str, bytes, str]:
-    """-> (file name, content, mime)"""
-    async with http.session().get(f'{SANDBOX_URL}/files/view', params={'path': path}, headers=_headers()) as r:
+async def home(user_id: str) -> str:
+    """The user's home folder in the sandbox (created on first use)."""
+    found = (await _get('/files/cwd', user_id)).get('cwd', '')
+    if not found:
+        raise SandboxError('The sandbox is not available.')
+    return found.rstrip('/')
+
+
+async def read_file(path: str, user_id: str) -> tuple[str, bytes, str]:
+    """-> (file name, content, mime), read as this user: other users' files are refused."""
+    async with http.session().get(f'{SANDBOX_URL}/files/view', params={'path': path}, headers=_headers(user_id)) as r:
         if r.status != 200:
             raise SandboxError(f'Sandbox file {path} could not be read ({r.status}).')
         return os.path.basename(path), await r.read(), r.headers.get('content-type', 'application/octet-stream')
 
 
-async def save_file(name: str, content: bytes, mime: str, folder: str = 'exports') -> str:
-    """Stores a file under /home/user/work/<folder>/<random>/ and returns its sandbox path."""
-    directory = f'/home/user/work/{folder}/{uuid.uuid4().hex[:8]}'
+async def save_file(name: str, content: bytes, mime: str, user_id: str, folder: str = 'exports') -> str:
+    """Stores a file in the user's home under work/<folder>/<random>/ and returns its sandbox path."""
+    directory = f'{await home(user_id)}/work/{folder}/{uuid.uuid4().hex[:8]}'
     form = aiohttp.FormData()
     form.add_field('file', content, filename=os.path.basename(name) or 'download', content_type=mime)
-    async with http.session().post(f'{SANDBOX_URL}/files/upload', params={'directory': directory}, data=form, headers=_headers()) as r:
+    async with http.session().post(f'{SANDBOX_URL}/files/upload', params={'directory': directory}, data=form, headers=_headers(user_id)) as r:
         if r.status != 200:
             raise SandboxError(f'The returned file could not be stored ({r.status}).')
         return (await r.json())['path']
@@ -56,8 +68,8 @@ async def save_file(name: str, content: bytes, mime: str, folder: str = 'exports
 _spec: tuple[float, dict] = (0.0, {})
 
 
-async def _get(path: str) -> dict:
-    async with http.session().get(f'{SANDBOX_URL}{path}', headers=_headers(), timeout=aiohttp.ClientTimeout(total=10)) as r:
+async def _get(path: str, user_id: str = '') -> dict:
+    async with http.session().get(f'{SANDBOX_URL}{path}', headers=_headers(user_id), timeout=aiohttp.ClientTimeout(total=10)) as r:
         return await r.json() if r.status == 200 else {}
 
 
@@ -97,7 +109,7 @@ def _make(method: str, path: str, op: dict, components: dict, cwd: str) -> Tool:
         url = SANDBOX_URL + re.sub(r'\{(\w+)\}', lambda m: str(args.get(m.group(1), '')), path)
         query = {k: v if isinstance(v, str) else json.dumps(v) for k, v in args.items() if k in in_query and v is not None}
         payload = {k: v for k, v in args.items() if k not in in_path | in_query}
-        headers = {**_headers(), 'X-User-Id': ctx.user_id, 'X-Session-Id': ctx.chat_id}
+        headers = {**_headers(ctx.user_id), 'X-Session-Id': ctx.chat_id}
         async with http.session().request(method, url, params=query, json=payload if body else None, headers=headers,
                                           timeout=aiohttp.ClientTimeout(total=330)) as r:
             text = await r.text(errors='replace')
@@ -110,7 +122,7 @@ def _make(method: str, path: str, op: dict, components: dict, cwd: str) -> Tool:
 async def tools(ctx: TurnContext) -> list[Tool]:
     """The sandbox functions in TOOL_NAMES; none when the sandbox is down (the chat still works without it)."""
     try:
-        spec, cwd = await _openapi(), (await _get('/files/cwd')).get('cwd', '')
+        spec, cwd = await _openapi(), (await _get('/files/cwd', ctx.user_id)).get('cwd', '')
     except Exception:
         return []
     components = (spec.get('components') or {}).get('schemas') or {}

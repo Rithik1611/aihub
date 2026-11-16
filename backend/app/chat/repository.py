@@ -6,15 +6,47 @@ conversation - the check lives here, not only in the router.
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import Select, delete, func, select, update
+from sqlalchemy import Select, delete, func, select, text, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.chat.metadata import clamp_metadata
 from app.chat.models import DEFAULT_SESSION_NAME, ChatMessage, ChatSession, LastActiveSession
 from app.chat.schemas import ChatMessageMetadata, ChatSender
+
+
+@dataclass(frozen=True)
+class HistoryMessage:
+    """A stored message as the agent's history reads it."""
+
+    id: uuid.UUID
+    sender: str
+    content: str
+    agent_items: dict[str, object] | None
+
+
+# Newest first. rn numbers the messages that carry an agent record; the newest `full` of them come whole.
+_HISTORY_SQL = text(
+    """
+    select m.id, m.sender, m.content,
+           case when m.agent_items is null or m.rn <= :full then m.agent_items
+                else jsonb_build_object(
+                    'covered', m.agent_items -> 'covered',
+                    'items', (select coalesce(jsonb_agg(e order by i), '[]'::jsonb)
+                              from jsonb_array_elements(m.agent_items -> 'items') with ordinality as t(e, i)
+                              where e ->> 'type' = 'message'))
+           end as agent_items
+    from (select id, sender, content, agent_items, created_at,
+                 row_number() over (partition by agent_items is not null order by created_at desc) as rn
+          from chat_message where session_id = :session_id
+          order by created_at desc limit :take) m
+    order by m.created_at desc
+    """
+).columns(agent_items=JSONB(none_as_null=True))  # type: ignore[no-untyped-call]  # JSONB.__init__ is untyped upstream
 
 
 class ChatRepository:
@@ -43,8 +75,11 @@ class ChatRepository:
             session.messages.sort(key=lambda m: m.created_at)
         return session
 
-    async def find_user_sessions(self, account_id: uuid.UUID) -> list[tuple[ChatSession, int, str | None]]:
-        """Session list rows: the session, its message count and its newest message."""
+    async def find_user_sessions(
+        self, account_id: uuid.UUID, limit: int, offset: int = 0, query: str | None = None
+    ) -> list[tuple[ChatSession, int, str | None]]:
+        """One page of session list rows (pinned first, then newest): the session, its message count and a
+        preview of its newest message. `query` matches the name or any message text."""
         count_sq = (
             select(func.count(ChatMessage.id))
             .where(ChatMessage.session_id == ChatSession.id)
@@ -52,7 +87,8 @@ class ChatRepository:
             .scalar_subquery()
         )
         last_sq = (
-            select(ChatMessage.content)
+            # A preview for the history list, not the whole reply (long replies made the list megabytes).
+            select(func.left(ChatMessage.content, 200))
             .where(ChatMessage.session_id == ChatSession.id)
             .correlate(ChatSession)
             .order_by(ChatMessage.created_at.desc())
@@ -62,8 +98,20 @@ class ChatRepository:
         stmt = (
             select(ChatSession, count_sq, last_sq)
             .where(ChatSession.account_id == account_id)
-            .order_by(ChatSession.updated_at.desc())
+            .order_by(ChatSession.is_pinned.desc(), ChatSession.updated_at.desc(), ChatSession.id)
+            .limit(limit)
+            .offset(offset)
         )
+        if query:
+            literal = query.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+            pattern = f"%{literal}%"
+            stmt = stmt.where(
+                ChatSession.name.ilike(pattern, escape="\\")
+                | select(ChatMessage.id)
+                .where(ChatMessage.session_id == ChatSession.id, ChatMessage.content.ilike(pattern, escape="\\"))
+                .correlate(ChatSession)
+                .exists()
+            )
         return [(s, c, m) for s, c, m in (await self._db.execute(stmt)).all()]
 
     async def is_session_owned(self, session_id: uuid.UUID, account_id: uuid.UUID) -> bool:
@@ -72,25 +120,19 @@ class ChatRepository:
         )
         return bool((await self._db.execute(stmt)).scalar_one())
 
-    async def find_owned_session_recent_messages(
-        self, session_id: uuid.UUID, account_id: uuid.UUID, take: int
-    ) -> list[ChatMessage] | None:
-        """Newest `take` messages, oldest-first; None when the session is not the caller's.
-
-        The window is taken from the newest end so the AI always reasons over the
-        latest turns, then reversed back into reading order.
-        """
+    async def find_owned_session_history(
+        self, session_id: uuid.UUID, account_id: uuid.UUID, take: int, full_turns: int
+    ) -> list[HistoryMessage] | None:
+        """The newest `take` messages, oldest first, for the agent's history; None when the session is not the
+        caller's. Only the newest `full_turns` agent records come whole: older ones are cut down in the database
+        to their conversation messages (what the history replays of them), so their tool results are never
+        loaded or decoded."""
         if not await self.is_session_owned(session_id, account_id):
             return None
-        stmt = (
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(take)
-        )
-        rows = list((await self._db.execute(stmt)).scalars().all())
-        rows.reverse()
-        return rows
+        rows = await self._db.execute(_HISTORY_SQL, {"session_id": session_id, "take": take, "full": full_turns})
+        found = [HistoryMessage(r.id, r.sender, r.content, r.agent_items) for r in rows]
+        found.reverse()
+        return found
 
     async def get_session_summary(self, session_id: uuid.UUID, account_id: uuid.UUID) -> str | None:
         """The rolling summary of the session's older messages (app.chat.summary), if any."""
@@ -241,6 +283,21 @@ class ChatRepository:
         await self._db.flush()
         await self._db.refresh(message)
         return message
+
+    async def append_to_message(
+        self, message_id: uuid.UUID, session_id: uuid.UUID, text: str, items: list[dict[str, object]]
+    ) -> int:
+        """Adds what a review found after the reply was stored: to its text, and its items to the agent's record."""
+        message = await self._db.get(ChatMessage, message_id)
+        if message is None or message.session_id != session_id:
+            return 0
+        message.content += text
+        if message.agent_items:
+            record = dict(message.agent_items)
+            record["items"] = [*record.get("items", []), *items]  # type: ignore[misc]
+            message.agent_items = record
+        await self._db.flush()
+        return 1
 
     async def delete_message(self, message_id: uuid.UUID, session_id: uuid.UUID) -> int:
         stmt = delete(ChatMessage).where(ChatMessage.id == message_id, ChatMessage.session_id == session_id)

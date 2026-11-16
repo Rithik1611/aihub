@@ -27,6 +27,9 @@ _REQUIRED_TOKEN_TYPE: Final = "access"  # noqa: S105  # a token type, not a secr
 _SAFE_METHODS: Final = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 
 _JSON: Final = "application/json"
+# A header no page can send cross-site without a CORS preflight, which aihub refuses for foreign
+# origins. File uploads (multipart, safelisted) carry it in place of the JSON content type.
+REQUEST_HEADER: Final = "x-aihub-request"
 
 
 # Built per raise, never shared: `raise X from exc` sets __cause__ and __traceback__
@@ -83,9 +86,10 @@ def _check_cross_site(request: Request, settings: Settings) -> None:
 
     - `Origin` names the page that sent the request. It must match the allowlist
       exactly; a missing Origin on a cookie-authenticated write is refused.
-    - A POST must be `application/json`. That content type is not CORS-safelisted,
-      so another site can only send it after a preflight aihub would refuse. Other
-      unsafe methods (PATCH, DELETE) always preflight.
+    - A POST must be `application/json` or carry the `X-Aihub-Request` header. Neither
+      is CORS-safelisted, so another site can only send them after a preflight aihub
+      would refuse. File uploads (multipart) use the header. Other unsafe methods
+      (PATCH, DELETE) always preflight.
 
     No token, no shared secret, nothing for the client to fetch. A Bearer token is
     never attached by the browser on its own, so Bearer requests are exempt.
@@ -103,7 +107,7 @@ def _check_cross_site(request: Request, settings: Settings) -> None:
         raise _cross_site_refused()
     if request.method == "POST":
         media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
-        if media_type != _JSON:
+        if media_type != _JSON and REQUEST_HEADER not in request.headers:
             logger.warning(
                 "cross-site write refused on POST %s: content-type %r",
                 request.url.path,

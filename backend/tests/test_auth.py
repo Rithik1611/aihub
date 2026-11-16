@@ -171,8 +171,9 @@ def cookie_write(
     method: str = "POST",
     origin: str | None = ALLOWED,
     content_type: str | None = "application/json",
+    extra: dict[str, str] | None = None,
 ) -> Request:
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = dict(extra or {})
     if origin is not None:
         headers["origin"] = origin
     if content_type is not None:
@@ -231,6 +232,21 @@ async def test_cookie_write_is_refused(name: str, request_factory: object) -> No
     with pytest.raises(HTTPException) as exc:
         await get_caller(request_factory(), allowed_settings())  # type: ignore[operator]
     assert exc.value.status_code == 403, name
+
+
+async def test_multipart_upload_with_request_header_is_accepted() -> None:
+    """The header forces a preflight like JSON does, so a file upload may carry it instead."""
+    request = cookie_write(content_type="multipart/form-data; boundary=x", extra={"x-aihub-request": "1"})
+    assert (await get_caller(request, allowed_settings())).account_id == uuid.UUID(ACCOUNT_ID)
+
+
+async def test_request_header_does_not_excuse_a_foreign_origin() -> None:
+    request = cookie_write(
+        origin="https://evil.example", content_type="multipart/form-data", extra={"x-aihub-request": "1"}
+    )
+    with pytest.raises(HTTPException) as exc:
+        await get_caller(request, allowed_settings())
+    assert exc.value.status_code == 403
 
 
 async def test_json_with_charset_is_accepted() -> None:

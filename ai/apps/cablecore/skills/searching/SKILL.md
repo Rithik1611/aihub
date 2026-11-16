@@ -14,7 +14,7 @@ description: Troubleshooting design searches - nothing or thousands found, a cou
 The same property can live in different keys by plant or product class: 1300 stores conductor size in `plant.conductorCSA`, Demo's conductor designs in `STRANDING.conductorCSA`; insulation is `INSULATING` (LV) or `INSULATING_MV` (MV). When `cc_attributes` returns several real keys for one property, search each and report the designs per key; say which keys you covered.
 
 ## Counts
-- The search index holds **every version** of a design. `cc_search` de-duplicates rows to the latest version and reports `designs` (distinct designs) next to `rows_in_index`. Report `designs`.
+- `cc_search` reports `designs` (distinct design codes, each at its latest version) and `configurations` (what the app's search bar lists: one result per configuration C0, C1, ...). Say which you give ("800 designs"); when the two differ, give both ("800 designs, 837 configurations in the search bar") so the user can match what they see.
 - `plant.<key> is null` matches only designs that have the attribute with an empty value; designs without the attribute at all are not counted. Say so when you report it.
 
 ## The description is a fallback

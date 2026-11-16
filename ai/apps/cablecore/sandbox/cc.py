@@ -1,7 +1,8 @@
 """cableCORE helpers for sandbox scripts: `import cc`.
 
-    rows = cc.sql('select "designId" from "Design" where "designId" = %s', ['LV-7035'])
     api = cc.API(ticket)                     # read-only ticket from the cablecore_api_access tool
+    api.rows('DesignHistory', record='LV-7035')        # table rows, same rules as the assistant's cc_related
+    api.rows('LookupTable', where={'name': {'op': 'ilike', 'value': '%armour%'}}, all_pages=True)
     api.get('/account/profile')
     api.post('/os/designs/search', {'query': 'conductorCSA>=50', 'pageSize': 500})  # read-only POSTs only
     # Changes are never made from here: the assistant uses its cc_action tool.
@@ -14,11 +15,10 @@ import json
 import os
 from typing import Any
 
-import psycopg
 import requests
-from psycopg.rows import dict_row
 
 API_BASE = os.environ['CC_API_BASE']
+ROWS_URL = os.environ['CC_ROWS_URL']
 _openapi: dict | None = None
 
 
@@ -28,13 +28,6 @@ class APIError(Exception):
     def __init__(self, method: str, path: str, status: int, body: Any):
         self.status, self.body = status, body
         super().__init__(f'{method} {path} -> {status}: {json.dumps(body)[:1500] if not isinstance(body, str) else body[:1500]}')
-
-
-def sql(query: str, params: list | tuple | None = None, limit: int = 500) -> list[dict]:
-    """Read-only query; returns at most `limit` rows as dicts."""
-    with psycopg.connect(os.environ['CC_DB_URL'], row_factory=dict_row) as con:
-        cur = con.execute(query, params)
-        return cur.fetchmany(limit) if cur.description else []
 
 
 class API:
@@ -50,6 +43,21 @@ class API:
         if r.status_code >= 400 or (isinstance(body, dict) and body.get('success') is False):
             raise APIError(method, path, r.status_code, body)
         return body
+
+    def rows(self, table: str, all_pages: bool = False, **args: Any) -> dict:
+        """Rows of a table (Prisma model name), all or those linked to `record`: {total, more, rows}. Same
+        arguments and rules as the assistant's cc_related (record, where, columns, order_by, limit <= 500,
+        offset, via, plant); the user's licence and plants apply. all_pages=True follows `more` to the end."""
+        out: dict = {}
+        while True:
+            r = requests.post(ROWS_URL, headers=self.headers, json={'table': table, **args}, timeout=300)
+            if r.status_code >= 400 or not r.text.startswith('{'):
+                raise APIError('POST', f'rows {table}', r.status_code, r.text)
+            page = r.json()
+            out = {**page, 'rows': [*out.get('rows', []), *page.get('rows', [])]}
+            if not (all_pages and page.get('more')):
+                return out
+            args['offset'] = len(out['rows'])
 
     def get(self, path: str, **params) -> Any:
         return self._call('GET', path, params=params)

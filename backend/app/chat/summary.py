@@ -57,7 +57,7 @@ async def refresh(session_id: uuid.UUID, window: int) -> None:
             ).all()
         lines = [f"{'USER' if s == ChatSender.HUMAN.value else 'ASSISTANT'}: {c[:3000]}" for s, c in rows]
         text = "\n".join(lines)[-SOURCE_MAX_CHARS:]  # the newest of the old messages matter most
-        out = await structured(Summary).ainvoke(PROMPT.format(summary=current, messages=text))
+        out = await structured(Summary, "housekeeping").ainvoke(PROMPT.format(summary=current, messages=text))
         async with SessionFactory() as db:
             await db.execute(update(ChatSession).where(ChatSession.id == session_id).values(summary=out.text.strip()))
             await db.commit()

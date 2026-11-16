@@ -41,6 +41,19 @@ class Settings(BaseSettings):
     tool_result_max_chars: int = Field(default=40_000, ge=1000)
     # after-turn checks and titles (LangChain chat model); empty = the chat model above
     check_model: str = ''
+    # OCR for scanned PDF pages: Azure AI Document Intelligence. Empty = scanned pages have no text.
+    ocr_api_url: str = ''
+    ocr_api_key: SecretStr = SecretStr('')
+    # Housekeeping model: DeepSeek on Azure (chat completions), for jobs that need no reasoning about the
+    # user's data: chat titles, rolling chat summaries, and (when coverage_check_model says so) the
+    # completeness check. Empty endpoint = everything stays on the chat model.
+    deepseek_endpoint: str = ''
+    deepseek_api_key: SecretStr = SecretStr('')
+    deepseek_deployment_name: str = 'DeepSeek-V4-Pro'
+    housekeeping_model: Literal['deepseek', 'luna'] = 'deepseek'
+    # The completeness check judges the answer against the request; it moves to DeepSeek only once its
+    # findings are shown to match luna's on the same answers.
+    coverage_check_model: Literal['deepseek', 'luna'] = 'luna'
     # Tool search (Responses API, gpt-5.4+): tools marked `defer` (sandbox, web) are hidden until the model
     # searches for them. Off: every tool's definition is sent with every request.
     tool_search: bool = False

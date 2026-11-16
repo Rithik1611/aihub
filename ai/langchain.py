@@ -3,14 +3,15 @@
 A. langchain_tools(ctx): the agent's tools as LangChain StructuredTools, with the same Pydantic argument
    models. Calls go through ai.tools.run, so validation, the write harness (one approval card per
    cc_action batch), and the result cap all still apply. Cards are put on ctx.emit; set it to receive them.
-C. structured(Model): a LangChain chat model that answers as a Pydantic model (after-turn checks, titles).
-   CHECK_MODEL picks another model for them; the default is the chat model.
+C. structured(Model, job): a LangChain chat model that answers as a Pydantic model. job='check' (the
+   writes check) runs on the chat model (or CHECK_MODEL); job='housekeeping' (titles, summaries) on DeepSeek
+   when DEEPSEEK_ENDPOINT is set, falling back to the chat model if DeepSeek fails.
 (B, tracing, is in http.py: LangSmith wraps the model client when LANGSMITH_TRACING=true.)
 """
 
 import json
 from functools import lru_cache
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from langchain_core.runnables import Runnable
 from langchain_core.tools import StructuredTool
@@ -41,9 +42,30 @@ def chat_model() -> ChatOpenAI:
     )
 
 
-def structured(model: type[M]) -> Runnable[Any, M]:
-    """`await structured(Verdict).ainvoke(prompt)` -> a validated Verdict."""
-    return chat_model().with_structured_output(model, method='json_schema', strict=True)  # type: ignore[return-value]
+@lru_cache
+def housekeeping_model() -> ChatOpenAI | None:
+    """DeepSeek for housekeeping jobs; None when it is not configured or switched off."""
+    s = settings()
+    if s.housekeeping_model != 'deepseek' or not s.deepseek_endpoint:
+        return None
+    return ChatOpenAI(
+        model=s.deepseek_deployment_name,
+        base_url=s.deepseek_endpoint.rstrip('/'),
+        api_key=s.deepseek_api_key,
+        max_completion_tokens=4000,
+        timeout=120,
+        max_retries=1,
+    )
+
+
+def structured(model: type[M], job: Literal['check', 'housekeeping'] = 'check') -> Runnable[Any, M]:
+    """`await structured(Verdict).ainvoke(prompt)` -> a validated Verdict. Housekeeping jobs run on DeepSeek
+    when it is configured, and fall back to the chat model when DeepSeek fails or answers off-schema."""
+    luna: Runnable[Any, Any] = chat_model().with_structured_output(model, method='json_schema', strict=True)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    cheap = housekeeping_model() if job == 'housekeeping' else None
+    if cheap is None:
+        return luna
+    return cheap.with_structured_output(model, method='json_schema', strict=True).with_fallbacks([luna])  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportReturnType]
 
 
 # ---- A: the agent's tools for LangChain / LangGraph

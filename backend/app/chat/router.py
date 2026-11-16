@@ -11,8 +11,9 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import Field, TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,7 @@ from app.chat.repository import ChatRepository
 from app.chat.schemas import (
     MAX_MESSAGE_LENGTH,
     ApiResponse,
+    ChatAnswer,
     ChatMessageMetadata,
     ChatMode,
     ChatReply,
@@ -99,6 +101,7 @@ async def _turn_events(
     new_session_id: uuid.UUID | None,
     page: str,
     file: UploadFile | None,
+    answers: list[ChatAnswer] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """One request of a chat turn on the agent (docs/adr/0009), as the frontend's stream events."""
     account_id = caller.account_id
@@ -122,6 +125,7 @@ async def _turn_events(
             attachment=attachment,
             tickets=Tickets(token),
             stub=settings.ai_stub,
+            answers=answers,
         )
         first = await anext(events)
     except agent.TurnBusy as exc:
@@ -156,7 +160,16 @@ async def send_message(
     _require_default(body.mode)
     return await _final(
         _turn_events(
-            request, caller, repo, settings, body.message, body.session_id, body.new_session_id, body.page, None
+            request,
+            caller,
+            repo,
+            settings,
+            body.message,
+            body.session_id,
+            body.new_session_id,
+            body.page,
+            None,
+            body.answers,
         )
     )
 
@@ -188,6 +201,9 @@ async def send_with_file(
     )
 
 
+_ANSWERS: TypeAdapter[list[ChatAnswer]] = TypeAdapter(Annotated[list[ChatAnswer], Field(max_length=20)])
+
+
 @router.post("/stream")
 async def stream_message(
     request: Request,
@@ -199,13 +215,27 @@ async def stream_message(
     new_session_id: Annotated[uuid.UUID | None, Form(alias="newSessionId")] = None,
     page: Annotated[str, Form(max_length=500)] = "",
     file: Annotated[UploadFile | None, File()] = None,
+    answers: Annotated[str | None, Form(max_length=60_000)] = None,
 ) -> StreamingResponse:
     """The same turn as server-sent events: `session`, `steps` (task rows), `delta` / `note` (text as it is
     written), then `done` (the stored reply, as /send returns it) or `error`."""
     if not message and file is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="message or file is required")
+    try:
+        answered = _ANSWERS.validate_json(answers) if answers else None
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="answers is not valid") from exc
     events = _turn_events(
-        request, caller, repo, settings, message or "(see the attached file)", session_id, new_session_id, page, file
+        request,
+        caller,
+        repo,
+        settings,
+        message or "(see the attached file)",
+        session_id,
+        new_session_id,
+        page,
+        file,
+        answered,
     )
     first = await anext(events)  # errors before the stream starts (auth, session, busy) stay HTTP errors
     session = uuid.UUID(first["sessionId"])
@@ -243,9 +273,13 @@ async def list_sessions(
     caller: ThrottledCaller,
     repo: Repository,
     mode: ChatMode = ChatMode.DEFAULT,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str | None, Query(max_length=200)] = None,
 ) -> ApiResponse[list[SessionSummary]]:
+    """One page of the caller's sessions; a page shorter than `limit` is the last."""
     _require_default(mode)
-    rows = await repo.find_user_sessions(caller.account_id)
+    rows = await repo.find_user_sessions(caller.account_id, limit, offset, (q or "").strip() or None)
     return ApiResponse(
         status_code=status.HTTP_200_OK,
         message="User sessions retrieved successfully",

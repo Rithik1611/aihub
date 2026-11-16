@@ -16,19 +16,45 @@ registry to Valkey + a worker queue if aihub ever runs several workers per chat.
 import asyncio
 import json
 import logging
+import re
 import uuid
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
 import ai
+import orjson
 from ai import sandbox
-from ai.context import ApprovalCard, Card, CardEvent, Check, Error, Items, TextDelta, ToolEnd, ToolStart, TurnContext
+from ai.context import (
+    ApprovalCard,
+    Card,
+    CardEvent,
+    Check,
+    Correction,
+    Done,
+    Error,
+    Items,
+    TextDelta,
+    ToolEnd,
+    ToolStart,
+    TurnContext,
+)
 
 from app.chat import files, memory, summary
 from app.chat.models import ChatMessage
-from app.chat.repository import ChatRepository
-from app.chat.schemas import ChatMessageMetadata, ChatQuestion, ChatReply, ChatSender, ChatTask, TaskStatus
+from app.chat.repository import ChatRepository, HistoryMessage
+from app.chat.schemas import (
+    ChatAnswer,
+    ChatAttachment,
+    ChatMessageMetadata,
+    ChatQuestion,
+    ChatReply,
+    ChatSender,
+    ChatTask,
+    TaskDetail,
+    TaskKind,
+    TaskStatus,
+)
 from app.core.db import SessionFactory
 
 logger = logging.getLogger(__name__)
@@ -56,11 +82,13 @@ class Turn:
     tasks: list[ChatTask] = field(default_factory=lambda: list[ChatTask]())
     text: str = ""  # answer text since the turn started or last resumed
     card: Card | None = None
+    images: dict[str, uuid.UUID] = field(default_factory=lambda: dict[str, uuid.UUID]())  # data URL -> chat_file id
     answer: "asyncio.Future[dict[str, Any]] | None" = None
     task: "asyncio.Task[None] | None" = None
 
 
 _turns: dict[uuid.UUID, Turn] = {}
+_starting: set[uuid.UUID] = set()  # chats whose message is being taken in, until its reply is done
 _tasks: set["asyncio.Task[None]"] = set()  # background work, referenced until done
 
 
@@ -89,7 +117,7 @@ def _compact(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [i for i in items if i.get("type") == "message"]
 
 
-def history_items(messages: list[ChatMessage]) -> list[dict[str, Any]]:
+def history_items(messages: Sequence[ChatMessage | HistoryMessage]) -> list[dict[str, Any]]:
     """The agent's history from stored messages, oldest first. Turns the agent ran are replayed from
     their items (the newest FULL_TURNS in full); anything else (cableCORE-migrated history, stub
     replies) as plain text."""
@@ -112,16 +140,28 @@ def history_items(messages: list[ChatMessage]) -> list[dict[str, Any]]:
     return out
 
 
+def _encoded(items: list[dict[str, Any]]) -> bytes:
+    # orjson: a turn's record can be MBs, and it is encoded on every turn.
+    return orjson.dumps(items, default=str, option=orjson.OPT_NON_STR_KEYS)
+
+
+def _without_nul(items: list[dict[str, Any]], data: bytes) -> tuple[list[dict[str, Any]], bytes]:
+    """NUL characters removed: Postgres cannot store them in text or JSONB (a tool may have read binary data)."""
+    if b"\\u0000" not in data:
+        return items, data
+    data = data.replace(b"\\u0000", b"")
+    return orjson.loads(data), data
+
+
 def _storable(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Without NUL characters, which Postgres cannot store in text or JSONB (a tool may have read binary data)."""
-    text = json.dumps(items, default=str)
-    return items if "\\u0000" not in text else json.loads(text.replace("\\u0000", ""))
+    return _without_nul(items, _encoded(items))[0]
 
 
 def _bounded(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keeps a stored turn under ITEMS_MAX_BYTES: long tool results are cut first, then tool calls go."""
-    items = _storable(items)
-    if len(json.dumps(items, default=str)) <= ITEMS_MAX_BYTES:
+    """Keeps a stored turn under ITEMS_MAX_BYTES: long tool results are cut first, then tool calls go.
+    Encoded once; again only when it has to be cut."""
+    items, data = _without_nul(items, _encoded(items))
+    if len(data) <= ITEMS_MAX_BYTES:
         return items
     cut = [
         {**i, "output": i["output"][:4000] + " …[cut]"}
@@ -129,7 +169,7 @@ def _bounded(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else i
         for i in items
     ]
-    return cut if len(json.dumps(cut, default=str)) <= ITEMS_MAX_BYTES else _compact(items)
+    return cut if len(_encoded(cut)) <= ITEMS_MAX_BYTES else _compact(items)
 
 
 # ---- events -> frontend
@@ -146,11 +186,25 @@ def step_label(name: str, args: dict[str, Any]) -> str:
         ids = [str(a.get("id", "")) for a in args.get("actions") or [] if isinstance(a, dict)]
         return f"Ran {ids[0] if len(ids) == 1 else f'{len(ids)} actions: ' + _clip(', '.join(ids), 70)}"
     labels: dict[str, Callable[[], str]] = {
-        "run_command": lambda: f"Ran {_clip(args.get('command'))}",
+        "run_command": lambda: command_label(str(args.get("command") or "")),
         "search_web": lambda: f"Searched the web: {_clip(args.get('query'))}",
         "fetch_url": lambda: f"Read {_clip(args.get('url'))}",
         "delegate_task": lambda: f"Sub-agent: {_clip(args.get('task'))}",
         "cablecore_api_access": lambda: "Opened read access for the sandbox",
+        "get_process_status": lambda: "Read the script's output",
+        "send_process_input": lambda: "Sent input to the running script",
+        "kill_process": lambda: "Stopped a running script",
+        "list_processes": lambda: "Listed running scripts",
+        "read_file": lambda: f"Read {_clip(args.get('path'), 60)}",
+        "write_file": lambda: f"Wrote {_clip(args.get('path'), 60)}",
+        "replace_file_content": lambda: f"Edited {_clip(args.get('path'), 60)}",
+        "list_files": lambda: (
+            f"Listed files in {_clip(args.get('path') or args.get('directory') or 'the workspace', 60)}"
+        ),
+        "grep_search": lambda: f"Searched files for {_clip(args.get('query') or args.get('pattern'), 50)}",
+        "glob_search": lambda: f"Looked for files {_clip(args.get('pattern'), 50)}",
+        "remember": lambda: "Saved a note to memory",
+        "search_chats": lambda: f"Searched past chats: {_clip(args.get('query'), 60)}",
         "cc_search": lambda: f"Searched {args.get('kind', 'design')}s: {_clip(args.get('query'))}",
         "cc_get": lambda: f"Opened {args.get('kind', '')} {_clip(args.get('ref'), 40)}",
         "cc_related": lambda: f"Read {args.get('table', '')} rows {_clip(args.get('record'), 40)}".strip(),
@@ -161,6 +215,53 @@ def step_label(name: str, args: dict[str, Any]) -> str:
         "ask_user": lambda: "Asked you a question",
     }
     return labels[name]() if name in labels else name.replace("_", " ")
+
+
+def command_label(command: str) -> str:
+    """A sandbox command as a step a person reads: a script by what its first comment says it does,
+    otherwise the command's first line."""
+    lines = [ln.strip() for ln in command.strip().splitlines() if ln.strip()]
+    first = lines[0] if lines else ""
+    script = re.match(r"(?:uv run )?(python3?|node|bash|sh)\b", first)
+    if script:
+        comment = next(
+            (ln.lstrip("# ").strip() for ln in lines[1:] if ln.startswith("#") and not ln.startswith("#!")), ""
+        )
+        kind = "Python" if script.group(1).startswith("python") else script.group(1)
+        return f"Ran a {kind} script: {_clip(comment, 70)}" if comment else f"Ran a {kind} script"
+    return f"Ran {_clip(first, 80)}"
+
+
+TASK_KINDS: Final = {"search_web": TaskKind.SEARCH, "fetch_url": TaskKind.SEARCH, "run_command": TaskKind.CODING}
+DETAIL_CHARS: Final = 480
+
+
+def step_details(name: str, args: dict[str, Any]) -> list[TaskDetail]:
+    """What the trace shows under a step when it starts: the command run or the page read."""
+    if name == "run_command" and args.get("command"):
+        return [TaskDetail(label=str(args["command"])[:DETAIL_CHARS], meta="command")]
+    if name == "fetch_url" and args.get("url"):
+        return [TaskDetail(label=str(args["url"])[:DETAIL_CHARS], meta="source")]
+    return []
+
+
+def result_details(name: str, result: str) -> list[TaskDetail]:
+    """What the trace adds when a step ends: the pages a web search found, or the start of a command's output."""
+    if name == "search_web":
+        return [TaskDetail(label=link, meta="source") for link in re.findall(r'"link":\s*"([^"]+)"', result)[:8]]
+    if name == "run_command" and (output := command_output(result).strip()):
+        return [TaskDetail(label=output[:DETAIL_CHARS], meta="output")]
+    return []
+
+
+def command_output(result: str) -> str:
+    """The printed text of a sandbox run_command result ({..., "output": [{"data": ...}]}). The result
+    preview may be cut mid-JSON, so the data strings are read one by one."""
+    chunks = re.findall(r'"data":\s*("(?:\\.|[^"\\])*")', result)
+    try:
+        return "".join(json.loads(c) for c in chunks).replace("\r\n", "\n") if chunks else result
+    except ValueError:
+        return result
 
 
 def card_questions(card: Card) -> list[ChatQuestion]:
@@ -217,10 +318,6 @@ async def _store_ai(
             agent_items,
         )
         await repo.set_session_suggestions(turn.session_id, turn.account_id, [])
-        if agent_items is not None and turn.new_session:
-            await repo.rename_if_still_default(
-                turn.session_id, turn.account_id, await ai.make_title(turn.first_text, content)
-            )
         name = await repo.get_session_name(turn.session_id, turn.account_id)
         index = await repo.count_messages(turn.session_id) - 1
         await db.commit()
@@ -237,9 +334,36 @@ async def _store_ai(
     )
 
 
+async def _title(turn: Turn, reply: str) -> None:
+    """Names a new chat from its first exchange (DeepSeek, after the reply) and tells the open stream."""
+    try:
+        title = await ai.make_title(turn.first_text, reply)
+        async with SessionFactory() as db:
+            repo = ChatRepository(db)
+            await repo.rename_if_still_default(turn.session_id, turn.account_id, title)
+            name = await repo.get_session_name(turn.session_id, turn.account_id)
+            await db.commit()
+        turn.events.put_nowait({"type": "title", "sessionId": str(turn.session_id), "sessionName": name})
+    except Exception:
+        logger.exception("naming chat %s failed", turn.session_id)
+
+
+async def _add_correction(turn: Turn, message_id: uuid.UUID, event: Correction) -> None:
+    """A review after the turn found more: it goes under the stored reply and to the open stream."""
+    async with SessionFactory() as db:
+        repo = ChatRepository(db)
+        await repo.append_to_message(
+            message_id, turn.session_id, event.text.replace("\x00", ""), _storable(event.items)
+        )
+        await db.commit()
+    turn.events.put_nowait({"type": "correction", "messageId": str(message_id), "text": event.text})
+
+
 async def _run(turn: Turn, ctx: TurnContext, history: list[dict[str, Any]], message: dict[str, Any]) -> None:
     put = turn.events.put_nowait
     items: list[dict[str, Any]] = []
+    stored: ChatReply | None = None
+    title: asyncio.Task[None] | None = None
     try:
         async for event in ai.run_turn(ctx, history, message):
             if isinstance(event, TextDelta):
@@ -250,13 +374,20 @@ async def _run(turn: Turn, ctx: TurnContext, history: list[dict[str, Any]], mess
                     put({"type": "note", "text": turn.text})
                     turn.text = ""
                 turn.tasks.append(
-                    ChatTask(key=event.call_id, label=step_label(event.name, event.args), status=TaskStatus.RUNNING)
+                    ChatTask(
+                        key=event.call_id,
+                        label=step_label(event.name, event.args),
+                        status=TaskStatus.RUNNING,
+                        kind=TASK_KINDS.get(event.name, TaskKind.STEP),
+                        details=step_details(event.name, event.args),
+                    )
                 )
                 put({"type": "steps", "tasks": [t.model_dump(by_alias=True) for t in turn.tasks]})
             elif isinstance(event, ToolEnd):
                 for t in turn.tasks:
                     if t.key == event.call_id:
                         t.status = TaskStatus.DONE if event.status == "completed" else TaskStatus.FAILED
+                        t.details += result_details(event.name, event.result)
                 put({"type": "steps", "tasks": [t.model_dump(by_alias=True) for t in turn.tasks]})
             elif isinstance(event, CardEvent):
                 turn.card = event.card
@@ -278,16 +409,33 @@ async def _run(turn: Turn, ctx: TurnContext, history: list[dict[str, Any]], mess
             elif isinstance(event, Error):
                 logger.warning("agent turn failed in session %s: %s", turn.session_id, event.message)
                 turn.text = turn.text or "Sorry, something went wrong while answering. Please try again."
-        reply = await _store_ai(
-            turn, turn.text.strip(), None, None, {"covered": turn.covered, "items": _bounded(items)}
-        )
-        put({"type": "finished", "reply": reply})
+            elif isinstance(event, Done):
+                # The turn is done: stored and handed to the user now; the chat takes new messages again.
+                stored = await _store_ai(
+                    turn,
+                    turn.text.strip(),
+                    None,
+                    None,
+                    {"covered": turn.covered, "items": _bounded(files.without_image_data(items, turn.images))},
+                )
+                _turns.pop(turn.session_id, None)
+                put({"type": "finished", "reply": stored})
+                if turn.new_session:
+                    title = asyncio.create_task(_title(turn, stored.reply))
+            elif isinstance(event, Correction) and stored is not None and stored.ai_message_id is not None:
+                await _add_correction(turn, stored.ai_message_id, event)
+        if stored is None:
+            raise RuntimeError("the turn ended without a reply")
+        if title is not None:
+            await title
         _background(summary.refresh(turn.session_id, HISTORY_MESSAGES))
     except Exception:
         logger.exception("agent turn crashed in session %s", turn.session_id)
-        put({"type": "failed"})
+        if stored is None:
+            put({"type": "failed"})
     finally:
         _turns.pop(turn.session_id, None)
+        put({"type": "closed"})
 
 
 def _context(turn: Turn, caller_token: str, username: str, tickets: Any) -> TurnContext:
@@ -311,7 +459,24 @@ def _context(turn: Turn, caller_token: str, username: str, tickets: Any) -> Turn
     )
 
 
-async def respond(
+async def respond(**kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+    """One request of a chat turn (see _respond). A chat takes one message at a time: the check and the claim
+    happen together, before anything awaits, and the claim lasts until the reply is done."""
+    session_id: uuid.UUID = kwargs["session_id"]
+    turn = _turns.get(session_id)
+    if session_id in _starting or (turn is not None and turn.answer is None):
+        raise TurnBusy
+    _starting.add(session_id)
+    try:
+        async for event in _respond(**kwargs):
+            if event["type"] in ("done", "error"):
+                _starting.discard(session_id)  # a new chat name or a review's correction may still follow
+            yield event
+    finally:
+        _starting.discard(session_id)
+
+
+async def _respond(
     *,
     account_id: uuid.UUID,
     username: str,
@@ -323,21 +488,25 @@ async def respond(
     attachment: tuple[str, bytes, str] | None,
     tickets: Any,
     stub: bool = False,
+    answers: list[ChatAnswer] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """One request of a chat turn: the frontend's stream events, ending with `done` (a ChatReply) or `error`.
     The session must already exist and belong to the account."""
     turn = _turns.get(session_id)
-    if turn is not None and turn.answer is None:
-        raise TurnBusy
     async with SessionFactory() as db:
         repo = ChatRepository(db)
         history = (
-            None if turn else await repo.find_owned_session_recent_messages(session_id, account_id, HISTORY_MESSAGES)
+            None
+            if turn
+            else await repo.find_owned_session_history(session_id, account_id, HISTORY_MESSAGES, FULL_TURNS)
         )
         earlier = None if turn else await repo.get_session_summary(session_id, account_id)
         meta = (
-            ChatMessageMetadata.model_validate({"attachment": {"name": attachment[0], "size": len(attachment[1])}})
-            if attachment
+            ChatMessageMetadata(
+                attachment=ChatAttachment(name=attachment[0], size=len(attachment[1])) if attachment else None,
+                answers=answers or None,
+            )
+            if attachment or answers
             else None
         )
         human = await repo.create_message(session_id, ChatSender.HUMAN, message, meta)
@@ -358,23 +527,38 @@ async def respond(
     else:
         turn = Turn(session_id, account_id, new_session, message, covered=[str(human.id)])
         path, document = None, ""
+        images: list[dict[str, Any]] = []
         if attachment:
             try:
-                path = await sandbox.save_file(attachment[0], attachment[1], attachment[2], folder="uploads")
+                path = await sandbox.save_file(
+                    attachment[0], attachment[1], attachment[2], str(account_id), folder="uploads"
+                )
             except sandbox.SandboxError as exc:
                 logger.warning("upload %s not copied to the sandbox: %s", attachment[0], exc)
             row, problem = await files.store(account_id, session_id, *attachment)
             document = files.document_block(row, path, problem)
-        user_item = ai.user_message(message, (attachment[0], path) if attachment and path else None, page, document)
+            if image := files.image_part(row, attachment[1]):
+                images.append(image)
+                turn.images[image["image_url"]] = row.id
+        user_item = ai.user_message(
+            message, (attachment[0], path) if attachment and path else None, page, document, images
+        )
         ctx = _context(turn, token, username, tickets)
         _turns[session_id] = turn
-        replay = ([summary.summary_item(earlier)] if earlier else []) + history_items(history or [])
+        replay = await files.with_image_data(
+            ([summary.summary_item(earlier)] if earlier else []) + history_items(history or [])
+        )
         turn.task = asyncio.create_task(_run(turn, ctx, replay, user_item))
 
     while True:
         event = await turn.events.get()
-        if event["type"] in ("paused", "finished"):
+        if event["type"] == "paused":
             yield _done(event["reply"], human.id, index)
+            return
+        if event["type"] == "finished":  # the reply; a new chat's name and a review's correction may follow
+            yield _done(event["reply"], human.id, index)
+            continue
+        if event["type"] == "closed":
             return
         if event["type"] == "failed":
             yield {

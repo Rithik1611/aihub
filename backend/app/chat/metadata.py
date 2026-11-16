@@ -7,7 +7,7 @@ field is clamped before it is stored. Ported from cableCORE's clampChatMetadata.
 import json
 from typing import Final
 
-from app.chat.schemas import ChatMessageMetadata, ChatQuestion, ChatTask, TaskDetail
+from app.chat.schemas import ChatAnswer, ChatMessageMetadata, ChatQuestion, ChatTask, TaskDetail
 
 MAX_TASKS: Final = 50
 MAX_TASK_DETAILS: Final = 20
@@ -17,6 +17,7 @@ MAX_TEXT: Final = 500
 MAX_QUESTION_LEAD: Final = 4000
 MAX_SUGGESTIONS: Final = 10
 MAX_STATE_BYTES: Final = 32_768
+MAX_ANSWERS: Final = 20
 
 
 def _clamp_text(value: str, limit: int = MAX_TEXT) -> str:
@@ -29,6 +30,7 @@ def _clamp_task(task: ChatTask) -> ChatTask:
         label=_clamp_text(task.label),
         amount=_clamp_text(task.amount),
         status=task.status,
+        kind=task.kind,
         details=[
             TaskDetail(label=_clamp_text(d.label), meta=_clamp_text(d.meta)) for d in task.details[:MAX_TASK_DETAILS]
         ],
@@ -71,4 +73,9 @@ def clamp_metadata(metadata: ChatMessageMetadata) -> ChatMessageMetadata:
         ),
         stopped=metadata.stopped if metadata.stopped else None,
         complete=metadata.complete if metadata.complete else None,
+        answers=(
+            [ChatAnswer(q=_clamp_text(a.q), a=_clamp_text(a.a)) for a in metadata.answers[:MAX_ANSWERS]]
+            if metadata.answers
+            else None
+        ),
     )

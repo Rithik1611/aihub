@@ -9,7 +9,6 @@ is not in the index).
 
 import asyncio
 import time
-from collections import Counter
 from typing import Any
 
 from ai.apps.cablecore import api, records
@@ -56,21 +55,53 @@ async def meta() -> dict[str, dict[str, Any]]:
     return _meta[1]
 
 
-def _values(key: str) -> tuple[int, list[tuple[str, int]]]:
-    """How many designs have a value for this key, and the most common values, from the database."""
+# A stored value as text, read like records._value: the first non-empty typed column; a dropdown's JSON gives its
+# valueDropdown. Counted in the database: a key can have tens of thousands of value rows (1.6M in all), and
+# loading them to count in Python was most of aihub's CPU under load.
+VALUE_SQL = '''coalesce(
+    nullif(v."valueString", ''), v."valueDecimal"::float8::text, v."valueInt"::text, v."valueBoolean"::text,
+    v."valueDateTime"::text,
+    case when pg_input_is_valid(v."valueDropdown", 'jsonb') and jsonb_typeof(v."valueDropdown"::jsonb) = 'object'
+              and v."valueDropdown"::jsonb ? 'valueDropdown'
+         then nullif(v."valueDropdown"::jsonb ->> 'valueDropdown', '')
+         else nullif(v."valueDropdown", '') end)'''
+# Counted in distinct designs (design codes), not stored values: a design has a value row per version and,
+# for a process attribute, per process layer, so counting rows over-counts. A design counts once for each value
+# any of its versions holds.
+COUNT_SQL = '''with vals as (select {value} as val, c."designId" as d {source}),
+held as (select val, d from vals where val is not null group by val, d),
+per as (select val, count(*) as n from held group by val)
+select per.val, per.n, (select count(distinct d) from held) as total from per
+order by per.n desc, per.val limit %s'''
+_TO_DESIGN = 'join "DesignVersion" dv on dv.id = v."designId" join "Config" c on c.id = dv."configId" '
+PROCESS_SOURCE = ('from "ProcessAttributeValue" v ' + _TO_DESIGN + 'join "ProcessAttribute" a on a.id = v."processAttributeId" '
+                  'join "Process" pr on pr.id = a."processId" where pr.name = %s and a.name = %s')
+PLANT_SOURCE = ('from "PlantAttributeValue" v ' + _TO_DESIGN
+                + 'join "PlantAttribute" a on a.id = v."plantAttributeId" where a.name = %s')
+_counted: dict[tuple[str, tuple[str, ...]], tuple[float, tuple[int, list[tuple[str, int]]]]] = {}
+
+
+def _values(key: str, plant_ids: tuple[str, ...] = ()) -> tuple[int, list[tuple[str, int]]]:
+    """How many designs (distinct design codes, any version) have a value for this key, and the most common
+    values with their design counts, from the database; only the given plants' attributes when plant_ids is set."""
     if '.' in key:
-        process, name = key.split('.', 1)
-        rows = records._rows('select v.* from "ProcessAttributeValue" v join "ProcessAttribute" a on a.id = v."processAttributeId" '
-                             'join "Process" pr on pr.id = a."processId" where pr.name = %s and a.name = %s', (process, name))
+        source, params = PROCESS_SOURCE, tuple(key.split('.', 1))
     else:
-        rows = records._rows('select v.* from "PlantAttributeValue" v join "PlantAttribute" a on a.id = v."plantAttributeId" '
-                             'where a.name = %s', (key,))
-    counts = Counter(str(v) for v in (records._value(r) for r in rows) if v not in (None, ''))
-    return sum(counts.values()), counts.most_common(VALUES_SHOWN)
+        source, params = PLANT_SOURCE, (key,)
+    if plant_ids:
+        source, params = f'{source} and a."plantId"::text = any(%s)', (*params, list(plant_ids))
+    rows = records._rows(COUNT_SQL.format(value=VALUE_SQL, source=source), (*params, VALUES_SHOWN))
+    return (int(rows[0]['total']) if rows else 0), [(str(r['val']), int(r['n'])) for r in rows]
 
 
-async def values(key: str) -> tuple[int, list[tuple[str, int]]]:
-    return await asyncio.to_thread(_values, key)
+async def values(key: str, plant_ids: tuple[str, ...] = ()) -> tuple[int, list[tuple[str, int]]]:
+    """_values, remembered for TTL_S: design data changes slowly and the same keys come up again and again."""
+    hit = _counted.get((key, plant_ids))
+    if hit and time.monotonic() - hit[0] < TTL_S:
+        return hit[1]
+    found = await asyncio.to_thread(_values, key, plant_ids)
+    _counted[(key, plant_ids)] = (time.monotonic(), found)
+    return found
 
 
 def _usage(keys: list[str]) -> dict[str, int]:
@@ -90,7 +121,8 @@ def _usage(keys: list[str]) -> dict[str, int]:
     return usage
 
 
-async def find(token: str, words: list[str], process: str = '', limit: int = 12) -> tuple[int, list[dict[str, Any]]]:
+async def find(token: str, words: list[str], process: str = '', limit: int = 12,
+               plant_ids: tuple[str, ...] = ()) -> tuple[int, list[dict[str, Any]]]:
     """Attributes whose name or label contains any of the words, grouped by name with every place the attribute
     lives (design level as plant.<name>, processes as PROCESS.<name>), most used first, with common values.
     Returns (number of matching attribute names, the top `limit` groups)."""
@@ -113,7 +145,7 @@ async def find(token: str, words: list[str], process: str = '', limit: int = 12)
     ranked = sorted(groups, key=lambda n: -sum(usage.get(k, 0) for k in groups[n]))[:limit]
     locations = [k for n in ranked for k in sorted(groups[n], key=lambda k: ('.' in k, -usage.get(k, 0))) if usage.get(k, 0)][:LOCATIONS_MAX]
     # ponytail: one query per location, concurrently; count in SQL instead if this shows up in latency
-    found = dict(zip(locations, await asyncio.gather(*(values((info.get(k) or {}).get('key', k)) for k in locations))))
+    found = dict(zip(locations, await asyncio.gather(*(values((info.get(k) or {}).get('key', k), plant_ids) for k in locations))))
     rows = []
     for name in ranked:
         first = info.get(groups[name][0]) or {}

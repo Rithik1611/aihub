@@ -7,13 +7,18 @@ stored at the provider (store=False): reasoning travels encrypted in the items t
 
 import asyncio
 import json
+import logging
 import os
 from dataclasses import replace
 from typing import AsyncIterator
 
+from opentelemetry import trace
+
 from ai import apps, ask_user, http, memory, sandbox, web
 from ai.context import Event, TurnContext
 from ai.tools import Tool, run, tool
+
+log = logging.getLogger(__name__)
 
 MAX_STEPS = int(os.getenv('AGENT_MAX_STEPS', '100'))
 REASONING_EFFORT = os.getenv('AGENT_REASONING_EFFORT', 'medium')
@@ -87,16 +92,25 @@ async def _drain(task: asyncio.Task, queue: asyncio.Queue) -> AsyncIterator[Even
         return
 
 
+def _body(input_items: list[dict], specs: list[dict]) -> dict:
+    """The conversation and tool list for a model call. The OpenAI SDK walks every item of `input`/`tools` to convert
+    types before sending (the second biggest CPU cost under load); `extra_body` is sent as it is, so it is used
+    unless this call is traced, where Langfuse reads `input` from the arguments to record the prompt."""
+    if trace.get_current_span().is_recording():
+        return {'input': input_items, 'tools': specs}
+    return {'extra_body': {'input': input_items, 'tools': specs}}
+
+
 async def agent(ctx: TurnContext, instructions: str, items: list[dict], tools: dict[str, Tool],
-                usage: dict[str, int], stream_text: bool = True) -> AsyncIterator[Event]:
+                usage: dict[str, int], stream_text: bool = True, max_steps: int = MAX_STEPS) -> AsyncIterator[Event]:
     """Runs model steps until the model answers without tool calls. New output is appended to `items`."""
     specs = [t.spec() for t in tools.values()]
     retried = False
-    for _ in range(MAX_STEPS):
+    for _ in range(max_steps):
         response = None
         try:
             stream = await http.llm().responses.create(
-                model=http.model(), instructions=instructions, input=[_input_item(i) for i in items], tools=specs,
+                model=http.model(), instructions=instructions, **_body([_input_item(i) for i in items], specs),
                 reasoning={'effort': REASONING_EFFORT}, store=False, include=['reasoning.encrypted_content'], stream=True,
             )
         except Exception as e:  # noqa: BLE001 - only a context overflow is handled; anything else re-raises
@@ -134,7 +148,7 @@ async def agent(ctx: TurnContext, instructions: str, items: list[dict], tools: d
                 args = {}
             queue.put_nowait({'type': 'tool.start', 'call_id': c['call_id'], 'name': c['name'], 'args': args})
             status, result = await run(tools, step_ctx, c['name'], c.get('arguments') or '{}')
-            queue.put_nowait({'type': 'tool.end', 'call_id': c['call_id'], 'name': c['name'], 'status': status, 'result': result[:500]})
+            queue.put_nowait({'type': 'tool.end', 'call_id': c['call_id'], 'name': c['name'], 'status': status, 'result': result[:3000]})
             return {'type': 'function_call_output', 'call_id': c['call_id'], 'output': result}
 
         async def run_step() -> list[dict]:
@@ -184,8 +198,37 @@ async def turn_tools(ctx: TurnContext, instructions: str, usage: dict[str, int])
     return by_name
 
 
+REVIEW_STEPS = 8
+REVIEW_PROMPT = """[Automatic review of your answer above - not written by the user]
+{findings}
+
+Check each point now: read the stored value, lookup row or formula branch it needs, or confirm it from what you
+already read. Then write ONLY a short section that starts with "**Correction / added detail:**" giving what you
+found, as an addition to your answer (do not repeat the answer). If on checking your answer was already complete
+and every claim in it is shown, reply with exactly: NONE"""
+
+
+async def _review(ctx: TurnContext, instructions: str, items: list[dict], tools: dict[str, Tool],
+                  usage: dict[str, int], findings: str) -> tuple[str, list[dict]]:
+    """One more pass on the gaps the completeness check found: -> (section to add or '', the pass's items).
+    Not streamed token by token: a pass that ends in NONE must leave no trace on screen."""
+    prompt = {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': REVIEW_PROMPT.format(findings=findings.strip())}]}
+    work = [*items, prompt]
+    start = len(work) - 1
+    async for event in agent(ctx, instructions, work, tools, usage, stream_text=False, max_steps=REVIEW_STEPS):
+        ctx.emit(event)  # only cards come out of a non-streamed pass
+    text = text_of(work[start:]).strip()
+    return ('' if not text or text.upper().startswith('NONE') else text), work[start:]
+
+
+# The review runs after the turn is done, so nothing in it may need the user or change anything: it reads
+# more data only (no web research, cards, changes, sub-agents or saved notes).
+REVIEW_EXCLUDED = frozenset({'search_web', 'fetch_url', 'ask_user', 'cc_action', 'delegate_task', 'remember', 'cc_note'})
+
+
 async def run_turn(ctx: TurnContext, history: list[dict], message: dict) -> AsyncIterator[Event]:
-    """One chat turn. history: the items earlier turns' `items` events gave; message: context.user_message(...)."""
+    """One chat turn. history: the items earlier turns' `items` events gave; message: context.user_message(...).
+    Yields the answer and `done`; after `done`, a `correction` when the completeness review found something."""
     usage: dict[str, int] = {}
     turn_items = [message]
     try:
@@ -198,10 +241,26 @@ async def run_turn(ctx: TurnContext, history: list[dict], message: dict) -> Asyn
             yield event
         turn_items += items[start:]
         request = ' '.join(p.get('text', '') for p in message['content'] if isinstance(p, dict))
-        for check in await pack.after_turn(ctx, request, text_of(turn_items)):
+        reply = text_of(turn_items)
+        for check in await pack.after_turn(ctx, request, reply):
             yield check
             turn_items.append({'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': check['note']}]})
     except Exception as e:
         yield {'type': 'error', 'message': f'{type(e).__name__}: {e}'}
+        yield {'type': 'items', 'items': turn_items}
+        yield {'type': 'done', 'usage': usage}
+        return
     yield {'type': 'items', 'items': turn_items}
     yield {'type': 'done', 'usage': usage}
+    # After the turn: an answer about the user's data is checked for gaps, and a review pass adds what it finds.
+    try:
+        check = getattr(pack, 'coverage', None)
+        calls = [i['name'] for i in turn_items if i.get('type') == 'function_call']
+        found = await check(ctx, request, reply, calls) if check else None
+        if found:
+            readers = {n: t for n, t in tools.items() if n not in REVIEW_EXCLUDED}
+            added, review_items = await _review(ctx, instructions, items, readers, usage, found['note'])
+            if added:
+                yield {'type': 'correction', 'text': f'\n\n{added}', 'items': review_items}
+    except Exception as e:  # noqa: BLE001 - the answer stands without its review
+        log.warning(f'review after the turn failed: {type(e).__name__}: {e}')

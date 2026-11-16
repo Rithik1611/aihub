@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from ai import skills as skill_lib
-from ai.apps.cablecore import api, notes
+from ai.apps.cablecore import api, code, notes
 from ai.apps.cablecore.related import SCHEMA_DIR
 from ai.context import TurnContext
 from ai.settings import settings
@@ -18,6 +18,9 @@ from ai.settings import settings
 PROMPT_FILE = Path(__file__).parent / 'prompt.md'
 SKILLS = skill_lib.discover(skill_lib.CORE_DIR, Path(__file__).parent / 'skills')
 REBUILD_S = 1800  # same as the route index: new backend actions show up without a restart
+# Skills nearly every turn loads (data-model: 60% of turns): in the prompt itself, which is cached, instead of a
+# load_skill round trip of their own. They stay loadable by name.
+IN_PROMPT = ('data-model',)
 TOOL_SEARCH_NOTE = ('- Sandbox and web tools are not listed until you need them: tool search finds and loads them '
                     '(e.g. run_command, read_file, write_file, search_web, fetch_url, cablecore_api_access).\n')
 
@@ -100,9 +103,12 @@ async def fill(text: str, ctx: TurnContext) -> str:
 
 async def instructions(ctx: TurnContext) -> str:
     text = PROMPT_FILE.read_text(encoding='utf-8')
-    text = text.replace('{{SKILLS}}', skill_lib.index(SKILLS)).replace('{{TOOL_SEARCH}}', TOOL_SEARCH_NOTE if settings().tool_search else '')
+    on_demand = {n: s for n, s in SKILLS.items() if n not in IN_PROMPT}
+    built_in = '\n\n'.join(SKILLS[n].body for n in IN_PROMPT if n in SKILLS)
+    skills_part = f'{built_in}\n\n{skill_lib.index(on_demand)}'.strip()
+    text = text.replace('{{SKILLS}}', skills_part).replace('{{TOOL_SEARCH}}', TOOL_SEARCH_NOTE if settings().tool_search else '')
     text = await fill(text, ctx)
-    app_notes = notes.for_prompt()
+    app_notes = await notes.for_prompt(code.source_text)
     if app_notes:
         text = '# App notes (facts verified in earlier chats)\n' + app_notes + '\n\n' + text
     return text

@@ -34,6 +34,7 @@ Feature modules under `app/`, sharing `app/core/` (see
 |---|---|
 | `app/core/config.py` | Settings, read from env/`.env` |
 | `app/core/db.py` | Async engine, `Base`, request-scoped session |
+| `app/core/profiling.py` | Development only: `AIHUB_PROFILE=1` writes each function's CPU time to `AIHUB_PROFILE_FILE` every minute (yappi, all threads) |
 | `app/core/auth.py` | cableCORE JWT verification, AI licence, cross-site rules |
 | `app/core/rate_limit.py` | Per-account chat throttling |
 | `app/chat/router.py` | Chat endpoints: stream, send, progress, sessions |

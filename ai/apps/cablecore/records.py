@@ -6,11 +6,12 @@ Read as the `ai_reader` role (SELECT only), so this never changes data.
 import asyncio
 import json
 import re
+import threading
 from datetime import date, datetime
 from typing import Any, cast
 
-import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from ai.settings import settings
 
@@ -23,8 +24,21 @@ def _dsn() -> str:
     return settings().cc_db_url.get_secret_value().replace('host.docker.internal', 'localhost')
 
 
+POOL_MAX = 16  # connections shared by every lookup (they run in worker threads); a new one per query cost CPU under load
+_pool: ConnectionPool | None = None
+_pool_lock = threading.Lock()
+
+
+def _connections() -> ConnectionPool:
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = ConnectionPool(_dsn(), min_size=1, max_size=POOL_MAX, kwargs={'connect_timeout': 10}, open=True)
+        return _pool
+
+
 def _rows(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    with psycopg.connect(_dsn(), connect_timeout=10) as con:
+    with _connections().connection() as con:
         return con.cursor(row_factory=dict_row).execute(cast(Any, sql), params).fetchall()  # sql: our own fixed queries
 
 

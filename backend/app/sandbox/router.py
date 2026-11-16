@@ -4,7 +4,10 @@
                        only a short-lived ticket (from the agent's cablecore_api_access tool), never the
                        user's token; only reads pass (GET, or a route the backend marks read-only).
                        Changes go through the agent's cc_action: validated, approved, read back.
-/chat/files            Download of a file the agent made in the sandbox (replies link it as /sandbox/<path>).
+/cablecore/rows        Table rows for scripts (cc rows), through the assistant's cc_related as the ticket's
+                       user: the sandbox has no database login, so the chat's licence and plant rules hold.
+/chat/files            Download of a file the agent made in the caller's own sandbox home (replies link it
+                       as /sandbox/<path>).
 
 ponytail: tickets live in this process (one worker); Valkey with a TTL when there are several.
 """
@@ -16,18 +19,24 @@ import time
 from typing import Annotated, Any, Final
 
 import httpx
+import psycopg
 from ai import sandbox
+from ai.apps.cablecore.api import CableCoreError
 from ai.apps.cablecore.index import is_read_route
+from ai.apps.cablecore.tools import cc_related
+from ai.context import Answer, Card, TurnContext
 from ai.settings import settings as ai_settings
+from ai.tools import tool
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
+from pydantic import ValidationError
 
 from app.core.auth import CurrentCaller
 
 router = APIRouter(tags=["sandbox"])
 
 TICKET_TTL_S: Final = 15 * 60
-SANDBOX_WORK_DIR: Final = "/home/user/work/"
 _tickets: dict[str, tuple[str, float]] = {}  # ticket -> (cableCORE token, expiry)
+_ROWS: Final = tool(cc_related)  # validates arguments exactly as for the model
 
 
 class Tickets:
@@ -45,16 +54,48 @@ class Tickets:
         return {"ticket": ticket, "expires_in_s": TICKET_TTL_S}
 
 
-@router.api_route(
-    "/cablecore/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False
-)
-async def gateway(path: str, request: Request, x_cc_ticket: Annotated[str, Header()] = "") -> Response:
-    token, expiry = _tickets.get(x_cc_ticket, ("", 0.0))
+def _ticket_token(ticket: str) -> str:
+    token, expiry = _tickets.get(ticket, ("", 0.0))
     if not token or expiry < time.time():
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             "No valid ticket. Get one from the cablecore_api_access tool and send it as X-CC-Ticket.",
         )
+    return token
+
+
+async def _no_cards(card_id: str, card: Card) -> Answer:
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "The sandbox cannot ask the user.")
+
+
+@router.post("/cablecore/rows", include_in_schema=False)
+async def rows(request: Request, x_cc_ticket: Annotated[str, Header()] = "") -> Response:
+    """Table rows for sandbox scripts: the assistant's own cc_related as the ticket's user, so the same licence,
+    plant and table rules apply as in the chat. The sandbox has no database login of its own."""
+    token = _ticket_token(x_cc_ticket)
+    related = _ROWS.args_model
+    if related is None:  # cc_related is a Python tool: it always has its argument model
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "rows are not available")
+    try:
+        args = related.model_validate(await request.json())
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)[:2000]) from exc
+    ctx = TurnContext(user_id="", user_email="", cc_token=token, chat_id="", wait_answer=_no_cards)
+    try:
+        text = await _ROWS.fn(ctx, **args.model_dump(exclude_unset=True))
+    except CableCoreError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except psycopg.Error as exc:  # a filter that does not fit the column (e.g. text for a uuid): the script's mistake
+        reason = str(exc).splitlines()[0][:300]
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"The query failed: {reason}") from exc
+    return Response(str(text), media_type="application/json" if str(text).startswith("{") else "text/plain")
+
+
+@router.api_route(
+    "/cablecore/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False
+)
+async def gateway(path: str, request: Request, x_cc_ticket: Annotated[str, Header()] = "") -> Response:
+    token = _ticket_token(x_cc_ticket)
     if not await is_read_route(request.method, path, token):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "The sandbox has read-only access. Make changes with the cc_action tool."
@@ -75,12 +116,14 @@ async def gateway(path: str, request: Request, x_cc_ticket: Annotated[str, Heade
 
 @router.get("/chat/files")
 async def download(caller: CurrentCaller, path: Annotated[str, Query(min_length=2)]) -> Response:
-    """Only files under the sandbox work folder; never the schema, the helpers or anything else."""
+    """Only files in the caller's own sandbox home; never another user's, the helpers or anything else."""
     clean = posixpath.normpath(path)
-    if not clean.startswith(SANDBOX_WORK_DIR):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+    user_id = str(caller.account_id)
     try:
-        name, content, mime = await sandbox.read_file(clean)
+        own = await sandbox.home(user_id)
+        if not clean.startswith(own + "/"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+        name, content, mime = await sandbox.read_file(clean, user_id)
     except sandbox.SandboxError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found") from exc
     return Response(

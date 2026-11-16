@@ -88,6 +88,7 @@ A new app is a new folder in `apps/` exposing `instructions(ctx)`, `tools()` and
 | `TOOL_SEARCH` | off | sandbox and web tools hidden until the model finds them with the Responses API tool search |
 | `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` | off | LangSmith tracing of every model call. Sends chat content to LangSmith: use a self-hosted endpoint or clear it first |
 | `LANGFUSE_TRACING`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | off | Langfuse tracing (self-hosted): one trace per chat turn, session = chat, every model call nested under it. Traces contain chat content |
+| `LANGFUSE_SAMPLE_RATE` | `1.0` | share of chat turns traced (read by the Langfuse SDK). Tracing a turn costs CPU (about a fifth of aihub's under load): keep 1.0 in development, use e.g. `0.1` in production. Untraced turns also skip the OpenAI SDK's re-encoding of the conversation (`loop._body`) |
 
 All are declared and validated in [settings.py](settings.py).
 

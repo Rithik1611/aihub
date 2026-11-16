@@ -216,7 +216,7 @@ async def run(actions: list[Action] | list[dict[str, Any]], verify: list[str] | 
             stopped = True
             continue
         url_path = index.fill_path(route, path)
-        upload = await sandbox.read_file(file) if file else None
+        upload = await sandbox.read_file(file, ctx.user_id) if file else None
         status, data = await api.call(
             route.method, url_path, token, query=query,
             body=None if upload else body,
@@ -225,7 +225,7 @@ async def run(actions: list[Action] | list[dict[str, Any]], verify: list[str] | 
         )
         if isinstance(data, api.FileResult):
             # The route returned a file: store it in the sandbox and hand back its download link.
-            stored = await sandbox.save_file(data.name, data.content, data.mime)
+            stored = await sandbox.save_file(data.name, data.content, data.mime, ctx.user_id)
             data = {
                 'file': data.name,
                 'bytes': len(data.content),
@@ -233,6 +233,10 @@ async def run(actions: list[Action] | list[dict[str, Any]], verify: list[str] | 
                 'download_link': f'/sandbox{stored}',
                 **await asyncio.to_thread(_file_summary, data),
             }
+            sheets = data.get('sheets')
+            if isinstance(sheets, dict) and sheets and all(isinstance(s, dict) and s.get('data_rows') == 0 for s in sheets.values()):
+                data['empty'] = ('The file has headers but no data rows: the request matched nothing. Check the query or '
+                                 'filters (cc_describe) and run it again before giving the file to the user.')
         error = api.failed(status, data)
         outputs.append(None if error else api.unwrap(data))
         entry: dict[str, Any] = {'action': route.id, 'status': 'failed' if error else 'done'}

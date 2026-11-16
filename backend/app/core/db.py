@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 
+import orjson
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -17,6 +18,11 @@ class Base(DeclarativeBase):
     pass
 
 
+def _dumps(value: object) -> str:
+    # Non-string keys become strings, as with json.dumps.
+    return orjson.dumps(value, option=orjson.OPT_NON_STR_KEYS).decode()
+
+
 def _create_engine() -> AsyncEngine:
     settings = get_settings()
     return create_async_engine(
@@ -27,6 +33,10 @@ def _create_engine() -> AsyncEngine:
         pool_timeout=settings.db_pool_timeout_seconds,
         pool_recycle=settings.db_pool_recycle_seconds,
         pool_pre_ping=True,
+        # orjson: the agent records (JSONB, up to MBs a turn) are written and read on every turn; the standard
+        # json module was a large share of the CPU under load.
+        json_serializer=_dumps,
+        json_deserializer=orjson.loads,
         connect_args={
             # Server-side, so it survives a client that stops waiting: Postgres
             # aborts the statement instead of holding the connection open.

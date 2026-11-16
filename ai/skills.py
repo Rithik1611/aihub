@@ -67,8 +67,9 @@ def index(skills: dict[str, Skill]) -> str:
     if not skills:
         return ''
     lines = '\n'.join(f'- `{s.name}`: {s.description}' for s in skills.values())
-    return ('# Skills\n\nKnowledge to load with `load_skill` when the task needs it (it is not in this prompt):\n'
-            f'{lines}')
+    return ('# Skills\n\nKnowledge to load with `load_skill` when the task needs it (it is not in this prompt). '
+            'Load it in the same step as your first lookup (the tools of one step run together), not in a step '
+            f'of its own:\n{lines}')
 
 
 def load_skill_tool(skills: dict[str, Skill], fill: Fill | None = None) -> Tool:

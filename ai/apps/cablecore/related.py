@@ -7,8 +7,11 @@ read-only `ai_reader` role.
 """
 
 import asyncio
+import functools
+import heapq
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
@@ -16,6 +19,7 @@ from typing import Any
 from uuid import UUID
 
 from ai.apps.cablecore import records
+from ai.apps.cablecore.access import Plants
 from ai.settings import settings
 
 SCHEMA_DIR = settings().cc_schema_dir
@@ -81,6 +85,84 @@ def _model(name: str) -> Model:
 
 def _q(identifier: str) -> str:
     return '"' + identifier.replace('"', '') + '"'
+
+
+# ---- plant scope: which plant a row belongs to, followed through foreign keys to Plant
+
+# Records that own other rows: their plant is the row's plant (as the backend's PlantScopeService reads it, e.g. a
+# design version's plant is its config's).
+OWNERS = frozenset({'Design', 'DesignVersion', 'Config', 'EnquiryVersion', 'Enquiry'})
+OWNER_HOP = 0.3  # three hops through owners still beat one through anything else
+NAME_PENALTY = 3
+
+
+def _own_plant(m: Model, alias: str) -> tuple[str, str] | None:
+    """(condition, 'ids' | 'names') when the table says its plant itself; one %s, the plant ids or names."""
+    if m.name == 'Plant':
+        return f'{alias}.{_q(m.columns["id"])}::text = any(%s)', 'ids'
+    if m.name == 'Design':  # a design has no plant column: its configs carry it
+        cfg = models()['Config']
+        return (f'{alias}.{_q(m.columns["id"])} in (select {_q(cfg.columns["designId"])} from {_q(cfg.table)} '
+                f'where {_q(cfg.columns["plantId"])}::text = any(%s))'), 'ids'
+    if 'plantId' in m.columns:  # no plant = shared by every plant
+        col = f'{alias}.{_q(m.columns["plantId"])}'
+        return f'({col}::text = any(%s) or {col} is null)', 'ids'
+    for name in ('plant', 'plantName'):  # formulas and lookup tables store the plant's name ('ALL' = every plant)
+        if name in m.columns:
+            return f'{alias}.{_q(m.columns[name])} = any(%s)', 'names'
+    return None
+
+
+@functools.cache
+def _plant_path(name: str) -> tuple[tuple[str, Relation], ...] | None:
+    """The cheapest foreign-key route from a table to one that says its plant. A hop to the record that owns the
+    row (design, design version, its config, enquiry) costs less than any other, and a table storing a plant
+    *name* is a last resort ('ALL' rows there would let a row of any plant through)."""
+    done = object()
+    heap: list[tuple[float, int, str | object, tuple[tuple[str, Relation], ...]]] = [(0.0, 0, name, ())]
+    seen: set[str] = set()
+    tie = 1
+    while heap:
+        cost, _, current, path = heapq.heappop(heap)
+        if current is done:
+            return path
+        if not isinstance(current, str) or current in seen:
+            continue
+        seen.add(current)
+        model = models()[current]
+        if own := _own_plant(model, 't'):
+            heapq.heappush(heap, (cost + (NAME_PENALTY if own[1] == 'names' else 0), tie, done, path))
+            tie += 1
+            continue
+        for rel in model.relations:
+            if (len(rel.fields) == 1 and rel.target in models() and rel.target not in seen and rel.target != 'Account'
+                    and rel.fields[0] in model.columns and rel.refs[0] in models()[rel.target].columns):
+                heapq.heappush(heap, (cost + (OWNER_HOP if rel.target in OWNERS else 1), tie, rel.target, (*path, (current, rel))))
+                tie += 1
+    return None
+
+
+def plant_condition(name: str, alias: str = 't') -> tuple[str, str] | None:
+    """SQL keeping only rows of the given plants, with one %s (plant ids or names, as the second value says);
+    None for a table no foreign key ties to a plant."""
+    path = _plant_path(_model(name).name)
+    if path is None:
+        return None
+    end = models()[path[-1][1].target] if path else _model(name)
+    found = _own_plant(end, f'p{len(path)}' if path else alias)
+    assert found  # _plant_path stops only at such a table
+    cond, kind = found
+    for i in range(len(path) - 1, -1, -1):
+        source, rel = models()[path[i][0]], path[i][1]
+        target = models()[rel.target]
+        here, there = (alias if i == 0 else f'p{i}'), f'p{i + 1}'
+        cond = (f'{here}.{_q(source.columns[rel.fields[0]])} in (select {there}.{_q(target.columns[rel.refs[0]])} '
+                f'from {_q(target.table)} {there} where {cond})')
+    return cond, kind
+
+
+def has_plant(name: str) -> bool:
+    return _plant_path(_model(name).name) is not None
 
 
 async def _record_ids(record: str) -> list[tuple[str, list[str]]]:
@@ -168,21 +250,24 @@ def model_name(table: str) -> str:
 
 async def rows(table: str, record: str = '', where: dict | None = None, columns: list[str] | None = None,
                order_by: str = '', limit: int = 100, offset: int = 0, via: str = '',
-               plants: tuple[list[str], str] | None = None) -> dict:
-    """plants = (plant ids, how to say it): rows of a table with a plantId are limited to them, unless the read is
-    tied to one record (the record decides)."""
+               plants: Plants | None = None, refuse: Callable[[str], str | None] | None = None) -> dict:
+    """plants: rows are limited to these plants, always (a record or filters only narrow it further); None = no
+    limit (no access rules known). refuse(model) -> why a joined table may not be read, or None."""
     target = _model(table)
-    conds, params, joins = [], [], {}
+    conds: list[str] = []
+    params: list[Any] = []
+    joins: dict[str, tuple[str, Model, Relation]] = {}
     link = ''
     scope = None
     if record:
         cond, link_params, link = _link(target, await _record_ids(record), via)
         conds.append(cond)
         params += link_params
-    elif plants and 'plantId' in target.columns and 'plantId' not in (where or {}):
-        conds.append(f't.{_q(target.columns["plantId"])}::text = any(%s)')
-        params.append(plants[0])
-        scope = plants[1]
+    if plants is not None and (found := plant_condition(target.name)):
+        cond, kind = found
+        conds.append(cond)
+        params.append(plants.ids if kind == 'ids' else [*plants.names, 'ALL'])
+        scope = plants.label
     for name, spec in (where or {}).items():
         op, value = (spec.get('op', '='), spec.get('value')) if isinstance(spec, dict) else ('=', spec)
         op = str(op).lower()
@@ -205,6 +290,10 @@ async def rows(table: str, record: str = '', where: dict | None = None, columns:
     if order_by:
         desc = order_by.startswith('-')
         order = f' order by {_column(target, order_by.lstrip("-"), joins)} {"desc" if desc else "asc"} nulls last'
+    # ponytail: a joined row is checked for licence, not plant; it is the parent of an in-plant row
+    for _alias, other, _rel in joins.values():
+        if refuse and (why := refuse(other.name)):
+            raise ValueError(f'{other.name}: {why}')
     join_sql = ''.join(
         f' left join {_q(other.table)} {alias} on {alias}.{_q(other.columns[rel.refs[0]])} = t.{_q(target.columns[rel.fields[0]])}'
         for alias, other, rel in joins.values()
@@ -214,7 +303,7 @@ async def rows(table: str, record: str = '', where: dict | None = None, columns:
     limit = min(max(int(limit), 1), MAX_LIMIT)
     total = (await asyncio.to_thread(records._rows, f'select count(*) as n {base}', tuple(params)))[0]['n']
     found = await asyncio.to_thread(records._rows, f'select {", ".join(select)} {base}{order} limit {limit} offset {int(offset)}', tuple(params))
-    result = {'table': target.name, 'linked_by': link or None, **({'plants': scope} if scope else {}), 'total': total, 'offset': offset}
+    result = {'table': target.name, 'linked_by': link or None, **({'plants': scope} if scope else {}), 'total': total, 'counted': f'{target.name} rows', 'offset': offset}
     return await asyncio.to_thread(_fit, result, found)  # CPU work stays off the event loop
 
 

@@ -117,12 +117,19 @@ class Done(_Model):
     usage: dict[str, int]
 
 
+class Correction(_Model):
+    type: Literal['correction']
+    text: str  # what the review after the answer found, added under it (the turn is already done)
+    items: list[dict[str, Any]]  # the review's own items, appended to the turn's history
+
+
 class Error(_Model):
     type: Literal['error']
     message: str
 
 
-TurnEvent = Annotated[TextDelta | ToolStart | ToolEnd | CardEvent | Check | Items | Done | Error, Field(discriminator='type')]
+TurnEvent = Annotated[TextDelta | ToolStart | ToolEnd | CardEvent | Check | Items | Done | Correction | Error,
+                      Field(discriminator='type')]
 EVENTS: TypeAdapter[TurnEvent] = TypeAdapter(TurnEvent)
 
 
@@ -189,6 +196,8 @@ class TurnContext:
     app_id: str = 'cablecore'
     # Changes the write harness made in this turn, for the after-turn check. Lives and dies with the turn.
     writes: list[WriteRecord] = field(default_factory=lambda: list[WriteRecord]())
+    # Source files ('repo/path') the agent was shown in this turn: a shared app note must cite only these.
+    code_seen: set[str] = field(default_factory=lambda: set[str]())
     # Set by the loop: puts an event on the turn's stream.
     emit: Callable[[Event], None] = field(default=_no_emit, repr=False)
 
@@ -199,13 +208,15 @@ class TurnContext:
         return Answer.model_validate(await self.wait_answer(card_id, card) or {})
 
 
-def user_message(text: str, attachment: tuple[str, str] | None = None, screen: str = '', document: str = '') -> dict[str, Any]:
+def user_message(text: str, attachment: tuple[str, str] | None = None, screen: str = '', document: str = '',
+                 images: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """The user's message as the model sees it. attachment = (file name, sandbox path) of a file the
     backend uploaded to the sandbox; screen = the DesignCenter page the user is on, so "this design" resolves;
-    document = the attached file's text, so the whole document stays in the conversation's history."""
+    document = the attached file's text, so the whole document stays in the conversation's history;
+    images = attached images as Responses API input_image parts, which the model sees."""
     if attachment:
         text += f'\n\n[Attached file "{attachment[0]}" is at {attachment[1]}]'
     if document:
         text += f'\n\n{document}'
     text += f'\n\n[DesignCenter screen: {screen or "/"}]'
-    return {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': text}]}
+    return {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': text}, *(images or [])]}

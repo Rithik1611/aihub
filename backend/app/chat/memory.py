@@ -21,6 +21,10 @@ def _any_word(query: str) -> str:
     return " | ".join(f"{w}:*" for w in words)
 
 
+# Two short passages around the matched words, instead of the start of each message (results were ~14k chars).
+SNIPPET: Final = 'MaxWords=35, MinWords=12, MaxFragments=2, FragmentDelimiter=" … ", StartSel=**, StopSel=**'
+
+
 class Store:
     def __init__(self, account_id: uuid.UUID) -> None:
         self.account_id = account_id
@@ -52,7 +56,7 @@ class Store:
         return f"Kept for later chats: {fact}"
 
     async def search(self, user_id: str, chat_id: str, query: str, limit: int) -> list[dict[str, Any]]:
-        """Messages and uploaded files of the user's other chats, best match first."""
+        """Messages and uploaded files of the user's other chats, best match first, as snippets around the match."""
         account = self._mine(user_id)
         tsquery = _any_word(query)
         if not tsquery:
@@ -65,7 +69,7 @@ class Store:
             select(
                 ChatSession.name.label("chat"),
                 ChatMessage.sender.label("kind"),
-                func.left(ChatMessage.content, 600).label("text"),
+                func.ts_headline("simple", ChatMessage.content, q, SNIPPET).label("text"),
                 ChatMessage.created_at.label("at"),
                 func.ts_rank(message_doc, q).label("rank"),
             )
@@ -76,7 +80,7 @@ class Store:
             select(
                 ChatSession.name.label("chat"),
                 (literal("file ") + ChatFile.name).label("kind"),
-                func.left(ChatFile.text, 1500).label("text"),
+                func.ts_headline("simple", ChatFile.text, q, SNIPPET).label("text"),
                 ChatFile.created_at.label("at"),
                 func.ts_rank(file_doc, q).label("rank"),
             )

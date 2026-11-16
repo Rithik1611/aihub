@@ -61,9 +61,15 @@ def test_zero_match_hints_come_from_the_search_index(monkeypatch):
     async def meta():
         return {'conductortype': {'key': 'conductorType'}}
 
-    async def values(key):
+    async def values(key, plant_ids=()):
         return 10, [('CU', 8), ('AL', 2)]
 
+    from ai.apps.cablecore import access
+
+    async def user(_token):
+        return access.Access(activePlantId='p1', plants=[access.Plant(id='p1', name='1300')], access={'design': True})
+
+    monkeypatch.setattr(access, 'of', user)
     monkeypatch.setattr(attributes, 'index_keys', keys)
     monkeypatch.setattr(attributes, 'meta', meta)
     monkeypatch.setattr(attributes, 'values', values)
@@ -95,7 +101,7 @@ def test_cc_search_refuses_free_text(monkeypatch):
         if method == 'GET':  # the distinct-designId count
             return 200, {'values': ['LV-1'], 'total': 1}
         sent.append(body)
-        terms = [w for w in body['query'].split() if '=' not in w]
+        terms = [w for w in body['query'].split(' plant in (')[0].split() if '=' not in w]
         return 201, {'data': [{'designId': 'LV-1', 'version': 0}], 'pagination': {'total': 1},
                      'parsedQuery': {'filters': [], 'textTerms': terms, 'orGroups': []}}
 
@@ -105,7 +111,8 @@ def test_cc_search_refuses_free_text(monkeypatch):
     out = json.loads(asyncio.run(cc_search(ctx, 'design', 'PVC conductorType=CU')))
     assert 'refused' in out and 'PVC' in out['refused'] and 'rows' not in out
     found = json.loads(asyncio.run(cc_search(ctx, 'design', 'conductorType=CU')))
-    assert 'rows' in found and found['searched'] == 'plant 1300' and sent[-1]['plant'] == '1300'  # active plant by default
+    assert 'rows' in found and found['searched'].startswith('plant 1300') and sent[-1]['plant'] == '1300'  # active plant by default
     assert json.loads(asyncio.run(cc_search(ctx, 'design', 'conductorType=CU', plant='all')))['searched'] == 'all your plants'
-    assert 'plant' not in sent[-1]
+    # The index is not limited to the user's plants: 'all' names them in the query.
+    assert 'plant' not in sent[-1] and sent[-1]['query'].endswith('plant in ("1300","Demo")')
     assert 'no access to plant' in asyncio.run(cc_search(ctx, 'design', 'conductorType=CU', plant='9999'))

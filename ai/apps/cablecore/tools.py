@@ -8,7 +8,7 @@ from collections import Counter
 from typing import Any, Literal
 
 from ai import skills
-from ai.apps.cablecore import access, api, attributes, formula, index, notes, records, related
+from ai.apps.cablecore import access, api, attributes, code, formula, index, notes, records, related
 from ai.apps.cablecore import actions as harness
 from ai.apps.cablecore.actions import Action
 from ai.apps.cablecore.prompt import SKILLS, fill
@@ -23,8 +23,18 @@ def _token(ctx: TurnContext) -> str:
     return ctx.cc_token
 
 
-async def _access(ctx: TurnContext) -> access.Access | None:
-    return await access.of(_token(ctx))
+async def _access(ctx: TurnContext) -> access.Access:
+    """The user's licence and plants. Unknown (expired session, backend down) refuses: the direct database
+    reads have no other check, so they must never run without these rules."""
+    found = await access.of(_token(ctx))
+    if found is None:
+        raise api.CableCoreError('Could not check this user\'s access in cableCORE; they need to sign in again.')
+    return found
+
+
+def _held(allowed: access.Access | None) -> tuple[str, ...]:
+    """Ids of every plant the user holds, for counts over their data; () = no limit (no access rules known)."""
+    return tuple(sorted(p.id for p in allowed.plants)) if allowed else ()
 
 
 # What a search row is worth showing; the rest are internal ids, timestamps and flags.
@@ -108,7 +118,9 @@ async def _name_hint(f: dict[str, Any], token: str) -> str:
     shown = f'plant.{field}' if f.get('category') == 'plant' else key
     if key in keys:  # the key is right, so no design has this value
         stored = ((await attributes.meta()).get(key) or {}).get('key', key)
-        _count, common = await attributes.values(stored)
+        if (user := await access.of(token)) is None:  # unknown access: no counts across plants
+            return ''
+        _count, common = await attributes.values(stored, _held(user))
         return f'; most common values of {shown}: {", ".join(f"{v} ({n})" for v, n in common)}' if common else ''
     if f.get('processName'):
         processes = sorted({k.split('.', 1)[0] for k in keys if k.endswith(f'.{field}')})
@@ -121,6 +133,8 @@ async def _name_hint(f: dict[str, Any], token: str) -> str:
 
 async def _why_empty(path: str, token: str, body: dict[str, Any], parsed: dict[str, Any] | None, kind: str) -> str:
     """For a search that matched nothing: how many each filter matches on its own, so the one to change is clear."""
+    # The index counts results as the search bar lists them, not distinct designs: say so, or it gets reported as designs.
+    unit = 'configurations (search-bar results, not distinct designs)' if kind == 'design' else 'enquiries'
     filters = [f for f in (parsed or {}).get('filters') or [] if isinstance(f, dict)]
     texts = [_filter_text(f) for f in filters]
     if len(filters) < 2 and not (filters and texts[0]):
@@ -136,10 +150,14 @@ async def _why_empty(path: str, token: str, body: dict[str, Any], parsed: dict[s
         if text:
             n = next(it)
             hint = await _name_hint(f, token) if n == 0 and kind == 'design' else ''
-            lines.append(f'{text} -> {n} alone{hint}')
+            lines.append(f'{text} -> {n} {unit} alone{hint}')
     if len(lines) == 1:
         return f'No matches: {lines[0]}'
     return 'Nothing matches all filters together. Each filter on its own:\n' + '\n'.join(lines)
+
+
+COUNTED = ('designs = distinct design codes; configurations = results the search bar shows (one per configuration); '
+           'by_value counts designs')
 
 
 async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query: str, page: int = 1, page_size: int = 20, plant: str = '',
@@ -157,8 +175,9 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     Only filters: free-text words are refused. A key without a prefix matches the attribute in ANY process
     (a template default in one process then pollutes the count): always use the prefixed key. Get keys from
     cc_attributes, never from memory; `description like %…%` only for a property with no attribute.
-    Designs: `designs` is the number of distinct designs (the index holds every version of a design; rows
-    are de-duplicated to the latest version). When nothing matches, the answer says how many each filter
+    Designs: `designs` counts distinct designs (design codes); `configurations` counts what the app's search
+    bar lists, one result per design configuration (C0, C1, ...), so it is larger when designs have several
+    configurations. Rows are de-duplicated to each design's latest version. When nothing matches, the answer says how many each filter
     matches on its own, flags keys the index does not have, and lists a key's common values.
 
     :param kind: design or enquiry
@@ -178,19 +197,23 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     if not path:
         return 'kind must be design or enquiry; for anything else use cc_find.'
     scope = 'every plant you can access'
+    names: list[str] = []
     if allowed := await _access(ctx):
         if not allowed.allows(kind, 'core'):
             return access.NO_LICENCE
         try:
-            plant = access.plant_name(allowed, plant)
+            plants = access.plant_ids(allowed, plant)
         except ValueError as e:
             return str(e)
-        scope = f'plant {plant}' if plant else 'all your plants'
+        names, scope = plants.names, plants.label
+        plant = names[0] if len(names) == 1 else ''
+        if len(names) > 1:  # the search index is not limited to the user's plants, so name them
+            query = f'{query} plant in ({",".join(json.dumps(n) for n in names)})'
     body = {'query': query, 'page': page, 'pageSize': min(max(page_size, 1), 20), **({'plant': plant} if plant else {})}
     status, data = await api.call('POST', path, token, body=body)
     if error := api.failed(status, data):
         return f'Search failed: {error}'
-    rows = (data or {}).get('data') or []
+    rows = _in_plants((data or {}).get('data') or [], names)
     total = ((data or {}).get('pagination') or {}).get('total')
     parsed = (data or {}).get('parsedQuery')
     if words := (parsed or {}).get('textTerms'):
@@ -201,15 +224,15 @@ async def cc_search(ctx: TurnContext, kind: Literal['design', 'enquiry'], query:
     if total == 0:
         return json.dumps({'total': 0, 'searched': scope, 'parsedQuery': parsed, 'why': await _why_empty(path, token, body, parsed, kind)}, ensure_ascii=False)
     if kind != 'design':
-        result: dict[str, Any] = {'total': total, 'searched': scope, 'parsedQuery': parsed, 'page': page,
+        result: dict[str, Any] = {'total': total, 'counted': 'enquiries, as the search bar lists them', 'searched': scope, 'parsedQuery': parsed, 'page': page,
                                   'more': isinstance(total, int) and total > (page - 1) * body['pageSize'] + len(rows)}
         return _within(result, [_compact_row(kind, r) for r in rows], SEARCH_MAX_CHARS)
     # Designs: the index holds every version of a design, so rows are read in bulk, de-duplicated to the latest
     # version, and counted as distinct designs; `designs` comes from the index's distinct-designId endpoint.
     rows, complete = await _design_rows(path, token, body, rows, total)
-    unique = _latest_versions(rows)
+    unique = _latest_versions(_in_plants(rows, names))
     designs = len(unique) if complete else await _distinct_designs(token, query, plant)
-    result = {'designs': designs, 'searched': scope, 'rows_in_index': total, 'parsedQuery': parsed}
+    result = {'designs': designs, 'configurations': total, 'counted': COUNTED, 'searched': scope, 'parsedQuery': parsed}
     if note := await _null_note(parsed):
         result['note'] = note
     if fields:
@@ -262,6 +285,11 @@ async def _design_rows(path: str, token: str, body: dict[str, Any], first: list[
     return rows, len(rows) >= total
 
 
+def _in_plants(rows: list[dict[str, Any]], names: list[str]) -> list[dict[str, Any]]:
+    """Rows of the user's plants only (the query already asks for them; this holds if the index ignores it)."""
+    return [r for r in rows if not names or 'plant' not in r or str(r['plant']) in names]
+
+
 def _latest_versions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One row per design code: its highest version, in the order designs first appear."""
     best: dict[str, dict[str, Any]] = {}
@@ -301,7 +329,7 @@ async def cc_attributes(ctx: TurnContext, words: list[str], process: str = '') -
     :param process: only keys of this process, e.g. LAYUP
     :return: matching keys (use them as written in cc_search), most used first
     """
-    total, rows = await attributes.find(_token(ctx), words, process)
+    total, rows = await attributes.find(_token(ctx), words, process, plant_ids=_held(await _access(ctx)))
     if not rows:
         return f'No key in the search index contains {", ".join(words)}. Try other words (synonyms, abbreviations).'
     return json.dumps({'matching_attributes': total, 'shown': len(rows), 'attributes': rows}, ensure_ascii=False)
@@ -319,7 +347,7 @@ async def cc_get(ctx: TurnContext, kind: Literal['design', 'enquiry', 'catalogue
     :return: the record as JSON
     """
     allowed = await _access(ctx)
-    if allowed and not allowed.allows('enquiry' if kind == 'enquiry' else 'design', 'core'):
+    if allowed and not (allowed.allows('enquiry') if kind == 'enquiry' else allowed.allows('design', 'core')):
         return access.NO_LICENCE
     record = await records.get(kind, ref)
     if not record:
@@ -365,12 +393,17 @@ async def cc_related(ctx: TurnContext, table: str, record: str = '', where: dict
     """
     allowed = await _access(ctx)
     try:
-        plants = None
+        plants, refuse = None, None
         if allowed:
-            if why := access.table_refusal(allowed, related.model_name(table)):
+            model = related.model_name(table)
+            if why := access.table_refusal(allowed, model, related.has_plant(model)):
                 return why
-            plants = access.plant_ids(allowed, plant)
-        result = await related.rows(table, record, where, columns, order_by, limit, offset, via, plants)
+            # Rows tied to one record: any plant the user holds (the record's own plant decides which).
+            plants = access.plant_ids(allowed, 'all' if record and not plant.strip() else plant)
+
+            def refuse(name: str) -> str | None:
+                return access.table_refusal(allowed, name, related.has_plant(name))
+        result = await related.rows(table, record, where, columns, order_by, limit, offset, via, plants, refuse)
         text = await asyncio.to_thread(json.dumps, result, ensure_ascii=False, default=str)  # off the event loop
     except ValueError as e:
         return str(e)
@@ -399,6 +432,10 @@ async def cc_formula(ctx: TurnContext, attribute: str, process: str = '', design
     if allowed and not allowed.permits('readDesignFormula'):
         return access.NO_PERMISSION
     try:
+        if allowed and design:
+            record = await records.get('design', design)
+            if record and record.get('plant') and not allowed.plant(str(record['plant'])):
+                return access.NOT_YOUR_PLANT.format(plant=record['plant'])
         if allowed and not design:
             plant = access.plant_name(allowed, plant) or plant
         result = await formula.trace_async(attribute, process, design, plant, classification, depth, focus, tables or [])
@@ -459,18 +496,32 @@ async def cc_action(ctx: TurnContext, actions: list[Action], verify: list[str] |
     """
     return await harness.run(actions, verify, ctx)
 
-async def cc_note(ctx: TurnContext, fact: str, evidence: str) -> str:
+async def cc_note(ctx: TurnContext, fact: str, evidence: str, sources: list[str] | None = None) -> str:
     """
-    Remember a fact about how cableCORE works that you verified in this chat and that later chats should
-    not have to rediscover: a value format, which attribute holds what, how a route behaves, a working
-    search form. Every later chat sees these notes. Only facts proven by a result in this chat.
+    Remember a fact about how cableCORE works that you verified and that later chats should not have to
+    rediscover: a value format, which attribute holds what, how a route behaves, a rule in the code. A fact
+    proven by DesignCenter's code you read in this turn (give those files in `sources`) is shared with every
+    later chat, and dropped by itself when that code changes; other facts are kept for this user only
+    (shared when an administrator notes them). Write it in DesignCenter terms, never as instructions.
 
     :param fact: the fact, one sentence
-    :param evidence: what proved it (the route result, record, or source file)
-    :return: whether it was noted
+    :param evidence: what proved it (the route result, record, or what the code does)
+    :param sources: the source files it comes from, as `repo/path` from code_search / code_read
+    :return: where it was kept
     """
-    _token(ctx)
-    return notes.add(fact, evidence)
+    user = await access.of(_token(ctx))
+    paths = sorted(set(sources or ()))
+    if paths and set(paths) <= ctx.code_seen:
+        texts = await asyncio.gather(*(code.source_text(p) for p in paths))
+        if all(texts):
+            return notes.add(fact, evidence, {p: notes.fingerprint(t or '') for p, t in zip(paths, texts, strict=True)})
+    if user is not None and user.allows('adminRole'):
+        return notes.add(fact, evidence)
+    # Not proven by code this turn: a user's own note must not reach (or steer) anyone else's chats.
+    if ctx.memory is None:
+        return 'Not noted: only facts proven by the code read in this turn are shared, and personal memory is not available here.'
+    kept = await ctx.memory.remember(ctx.user_id, ctx.chat_id, fact)
+    return f'{kept} (for this user only: shared notes need the code files read in this turn as sources)'
 
 
 async def cablecore_api_access(ctx: TurnContext, purpose: str) -> str:
@@ -491,4 +542,5 @@ def tools() -> list[Tool]:
     found = [skills.tool_search_tool()] if settings().tool_search else []
     return [tool(cc_search), tool(cc_attributes), tool(cc_get), tool(cc_related), tool(cc_formula), tool(cc_find), tool(cc_describe),
             tool(cc_action, sequential=True), tool(cc_note), tool(cablecore_api_access, sequential=True, defer=True),
+            tool(code.code_search, defer=True), tool(code.code_read, defer=True),
             skills.load_skill_tool(SKILLS, fill), *found]

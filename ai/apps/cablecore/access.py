@@ -8,7 +8,7 @@ do not pass the API, so they are gated here by table. The API stays the enforcem
 
 import re
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel
 
@@ -127,12 +127,31 @@ _TABLES: list[tuple[re.Pattern[str], tuple[str, ...]]] = [(re.compile(p), keys) 
     (r'^Erp\w*$', ('integration',)),
     (r'^(CurrentRating\w*|BuriedConfiguration|AirConfiguration|DuctConfiguration)$', ('electrical', 'design')),
     (r'^DesignRequest$', ('requestDesk', 'design')),
+    # Tables with no plant: the licence of the backend routes that show them (the UI applies no plant check).
+    (r'^(AuditTrailSettings|FileRepository|NumberSequenceSettings|OpenSearchBulkCheckpoint)$', ('adminRole',)),
+    (r'^(AttributeHistory|DecimalSeperator|LabellingParameter|UnitConversion|UnitsGlobal|ResourceClassification|Template|ReportGroup)$',
+     ('core',)),
+    (r'^(ProductClassification|ClassificationHistory)$', ('design', 'enquiry', 'electrical', 'production')),
+    (r'^(Design|Calculation)NumberSequence$', ('numberSeq',)),
+    (r'^KnowledgeSource$', ('design', 'ai')),
+    (r'^(Knowledge\w*|Standard\w*|LearningContext|FormulaKnowledgeBase|ExtractedSourceTable)$', ('ai', 'tables')),
+    (r'^Report$', ('design', 'enquiry')),
+    (r'^LookupTable(History|Version)?$', ('tables', 'enquiry')),
 ]]
+UNLISTED = ('design', 'core')  # a table with a plant that no rule names: design data
 
 
-def table_refusal(a: Access, model: str) -> str | None:
-    """Why the user may not read this table through the assistant, or None. Unlisted tables are design data."""
-    keys = next((k for p, k in _TABLES if p.match(model)), ('design', 'core'))
+class Plants(NamedTuple):
+    """The plants a read covers: ids, names (for tables that store the plant's name) and how to say it."""
+    ids: list[str]
+    names: list[str]
+    label: str
+
+
+def table_refusal(a: Access, model: str, has_plant: bool = True) -> str | None:
+    """Why the user may not read this table through the assistant, or None. A table with a plant that no rule
+    names is design data; one without a plant must be named (internal tables no screen shows are refused)."""
+    keys = next((k for p, k in _TABLES if p.match(model)), UNLISTED if has_plant else ('never',))
     if keys == ('never',):
         return f'{model} is not readable through the assistant.'
     perms = [k.removeprefix('perm:') for k in keys if k.startswith('perm:')]
@@ -141,18 +160,20 @@ def table_refusal(a: Access, model: str) -> str | None:
     return None if a.allows(*keys) else NO_LICENCE
 
 
-def plant_ids(a: Access, plant: str) -> tuple[list[str], str]:
-    """Plants a read covers, and how to say it: '' = the active plant, 'all' = every plant the user holds, or one
-    plant by name. Raises ValueError for a plant the user does not hold."""
+def plant_ids(a: Access, plant: str) -> Plants:
+    """Plants a read covers: '' = the active plant, 'all' = every plant the user holds, or one plant by name.
+    Raises ValueError for a plant the user does not hold."""
+    def of(plants: list[Plant], label: str) -> Plants:
+        return Plants([p.id for p in plants], [p.name for p in plants], label)
     if plant.strip().lower() == 'all':
-        return [p.id for p in a.plants], 'all your plants'
+        return of(a.plants, 'all your plants')
     if plant.strip():
         found = a.plant(plant)
         if not found:
             raise ValueError(f'You have no access to plant {plant!r}. Your plants: {", ".join(p.name for p in a.plants)}.')
-        return [found.id], f'plant {found.name}'
+        return of([found], f'plant {found.name}')
     active = a.active_plant
-    return ([active.id], f'plant {active.name} (your active plant)') if active else ([p.id for p in a.plants], 'all your plants')
+    return of([active], f'plant {active.name} (your active plant)') if active else of(a.plants, 'all your plants')
 
 
 def plant_name(a: Access, plant: str) -> str:
@@ -200,7 +221,7 @@ async def turn_context(ctx: TurnContext) -> str:
 
 if __name__ == '__main__':
     full = Access(activePlantId='p1', plants=[Plant(id='p1', name='1300'), Plant(id='p2', name='Demo')], role='USER',
-                  access={'design': True, 'enquiry': False, 'anyModule': True}, write={'design': False},
+                  access={'design': True, 'enquiry': False, 'anyModule': True, 'core': True}, write={'design': False},
                   permissions={'readDesignFormula': True}, crud={'DESIGN': ['UPDATE']})
     assert route_refusal(full, 'GET', {'keys': ['enquiry']}) == NO_LICENCE
     assert route_refusal(full, 'GET', {'keys': ['design']}) is None
@@ -216,8 +237,10 @@ if __name__ == '__main__':
     assert table_refusal(full, 'Quotation') == NO_LICENCE and table_refusal(full, 'CostingVersion') == NO_LICENCE
     assert table_refusal(full, 'CarbonRollupBreakdown') is None and table_refusal(full, 'DesignHistory') is None and table_refusal(full, 'FormulaPlantHeaders') is None
     assert table_refusal(full, 'FormulaEnquiryHeaders') == NO_PERMISSION
-    assert plant_ids(full, '') == (['p1'], 'plant 1300 (your active plant)')
-    assert plant_ids(full, 'demo')[0] == ['p2'] and plant_ids(full, 'all')[0] == ['p1', 'p2']
+    assert table_refusal(full, 'DesignImportRun', has_plant=False) and table_refusal(full, 'UnitsGlobal', has_plant=False) is None
+    assert table_refusal(full, 'FileRepository', has_plant=False) == NO_LICENCE
+    assert plant_ids(full, '') == (['p1'], ['1300'], 'plant 1300 (your active plant)')
+    assert plant_ids(full, 'demo').ids == ['p2'] and plant_ids(full, 'all').names == ['1300', 'Demo']
     assert plant_name(full, '') == '1300' and plant_name(full, 'all') == ''
     try:
         plant_ids(full, '9999')

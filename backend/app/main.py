@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from app.chat.router import router as chat_router
 from app.core.config import Settings, get_settings
 from app.core.db import dispose_engine
+from app.core.profiling import maybe_profile
 from app.health.router import router as health_router
 from app.sandbox.router import router as sandbox_router
 
@@ -35,7 +36,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     if not settings.ai_stub:
         ai_settings.require()  # the agent's keys: fail at startup, not mid-chat
-    yield
+    async with maybe_profile():  # AIHUB_PROFILE=1 only (development)
+        yield
     await ai_http.close()
     await dispose_engine()
 
@@ -52,7 +54,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Aihub-Request"],
     expose_headers=["Retry-After"],
     max_age=600,
 )

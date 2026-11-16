@@ -6,6 +6,7 @@ Needs LUNA_BASE_URL / LUNA_API_KEY / LUNA_MODEL in the environment.
 import asyncio
 import json
 import os
+import re
 import sys
 
 import openpyxl
@@ -31,6 +32,11 @@ Judge whether the system delivers this use case for this prompt:
 - "not supported": the system says the capability or data does not exist in DesignCenter (e.g. no inventory/ERP, no machine data).
 Write for a project manager: plain words, no tool names."""
 
+# Source code in a reply (the agent may read DesignCenter's code, never show it): a source
+# file path, or TypeScript syntax.
+CODE = re.compile(r'\b[\w./-]+\.(?:ts|tsx|prisma)\b|\bsrc/|^\s*(?:export|import) |=>\s*\{|@(?:Injectable|Controller|Get|Post)\(', re.MULTILINE)
+
+
 class Verdict(BaseModel):
     result: Literal['pass', 'partial', 'fail', 'not supported']
     summary: str = Field(description='what the system did and found, 1-3 sentences')
@@ -50,7 +56,7 @@ async def grade(client, sem, uc, case, result):
                                         cards=json.dumps(turn.get('confirmations') or [], ensure_ascii=False)[:3000],
                                         answer=(turn.get('answer') or f"(no answer; error: {turn.get('error')})")[:15000]),
                     reasoning={'effort': 'low'}, store=False, text_format=Verdict)
-                return {'id': case['id'], **out.output_parsed.model_dump()}
+                return {'id': case['id'], **out.output_parsed.model_dump(), 'code_shown': bool(CODE.search(turn.get('answer') or ''))}
             except Exception as e:  # retry transient API/parse errors
                 err = str(e)
         return {'id': case['id'], 'result': 'ungraded', 'summary': '', 'reason': err[:200]}
@@ -63,10 +69,10 @@ async def main():
     results = json.load(open(sys.argv[3], encoding='utf-8'))
     client = AsyncOpenAI(base_url=os.environ['LUNA_BASE_URL'], api_key=os.environ['LUNA_API_KEY'])
     sem = asyncio.Semaphore(8)
-    graded = await asyncio.gather(*(grade(client, sem, ucs[r['id']], cases[r['id']], r) for r in results))
+    graded = await asyncio.gather(*(grade(client, sem, ucs.get(r['id']) or cases[r['id']], cases[r['id']], r) for r in results))
     json.dump(graded, open(sys.argv[3].replace('.json', '.graded.json'), 'w', encoding='utf-8'), indent=1, ensure_ascii=False)
     from collections import Counter
-    print(Counter(g['result'] for g in graded))
+    print(Counter(g['result'] for g in graded), 'code shown in', [g['id'] for g in graded if g.get('code_shown')])
 
 
 asyncio.run(main())

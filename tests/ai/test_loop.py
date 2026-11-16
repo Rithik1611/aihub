@@ -14,6 +14,11 @@ class Out(SimpleNamespace):
         return {k: v for k, v in vars(self).items() if v is not None}
 
 
+def sent(kw):
+    """The request as the model sees it: an untraced call sends the conversation and tools in extra_body."""
+    return {**kw, **kw.get('extra_body', {})}
+
+
 def response(*output):
     return SimpleNamespace(output=list(output), usage=SimpleNamespace(input_tokens=10, output_tokens=5))
 
@@ -26,7 +31,7 @@ class FakeModel:
         self.responses = SimpleNamespace(create=self.create)
 
     async def create(self, **kw):
-        self.requests.append(kw)
+        self.requests.append(sent(kw))
         if len(self.requests) == 1:
             r = response(
                 Out(type='reasoning', id='rs_1', encrypted_content='enc', status='completed'),
@@ -61,7 +66,7 @@ def test_turn(monkeypatch):
         return 'You help.'
 
     async def after_turn(ctx, request, reply):
-        return [{'type': 'check', 'kind': 'coverage', 'note': 'covered'}]
+        return [{'type': 'check', 'kind': 'writes', 'note': 'covered'}]
 
     async def no_tools(ctx):
         return []
@@ -119,3 +124,68 @@ def test_compact_keeps_newest_results_whole():
     outputs = [i['output'] for i in items[1:]]
     assert all(o.startswith(STUB) for o in outputs[:2]) and all(o == 'x' * 1000 for o in outputs[2:])
     assert compact(items, keep=6) == 0  # already cut: never cut twice
+
+
+def _answering(*texts):
+    """A model that answers each request with the next text (no tool calls)."""
+    requests = []
+
+    async def create(**kw):
+        requests.append(sent(kw))
+        text = texts[len(requests) - 1]
+        r = response(Out(type='message', role='assistant', content=[{'type': 'output_text', 'text': text}]))
+
+        async def stream():
+            yield SimpleNamespace(type='response.output_text.delta', delta=text)
+            yield SimpleNamespace(type='response.completed', response=r)
+
+        return stream()
+
+    return SimpleNamespace(responses=SimpleNamespace(create=create)), requests
+
+
+def _review_turn(monkeypatch, *texts):
+    async def instructions(ctx):
+        return 'You help.'
+
+    async def after_turn(ctx, request, reply):
+        return []
+
+    async def coverage(ctx, request, reply, calls):
+        return {'type': 'check', 'kind': 'coverage', 'note': '- Stated without the evidence shown: "complies"'}
+
+    async def nothing(ctx):
+        return []
+
+    async def no_prompt(ctx):
+        return ''
+
+    fake, requests = _answering(*texts)
+    monkeypatch.setattr(http, 'llm', lambda: fake)
+    monkeypatch.setattr(apps, 'get', lambda _id: SimpleNamespace(instructions=instructions, tools=lambda: [], after_turn=after_turn,
+                                                                 coverage=coverage))
+    monkeypatch.setattr(sandbox, 'tools', nothing)
+    monkeypatch.setattr(sandbox, 'instructions', no_prompt)
+    ctx = TurnContext(user_id='u', user_email='u@x', cc_token='t', chat_id='c', wait_answer=None)  # type: ignore[arg-type]
+
+    async def collect():
+        return [e async for e in loop.run_turn(ctx, [], user_message('does LV-1 comply?'))]
+
+    return asyncio.run(collect()), requests
+
+
+def test_review_adds_a_section_under_the_answer_after_the_turn(monkeypatch):
+    events, requests = _review_turn(monkeypatch, 'LV-1 complies.', '**Correction / added detail:** 1.0 mm stored, 1.0 mm required.')
+    assert ''.join(e['text'] for e in events if e['type'] == 'text.delta') == 'LV-1 complies.'
+    kinds = [e['type'] for e in events]
+    assert kinds.index('done') < kinds.index('correction')  # the turn finished before the review
+    correction = next(e for e in events if e['type'] == 'correction')
+    assert correction['text'] == '\n\n**Correction / added detail:** 1.0 mm stored, 1.0 mm required.'
+    assert not [e for e in events if e['type'] == 'check']  # the findings went to the model, not under the answer
+    assert 'complies' in requests[1]['input'][-1]['content'][0]['text']  # the review saw the findings
+
+
+def test_review_that_finds_nothing_adds_nothing(monkeypatch):
+    events, _ = _review_turn(monkeypatch, 'LV-1 complies: 1.0 mm stored, 1.0 mm required.', 'NONE')
+    assert ''.join(e['text'] for e in events if e['type'] == 'text.delta') == 'LV-1 complies: 1.0 mm stored, 1.0 mm required.'
+    assert not [e for e in events if e['type'] == 'correction']

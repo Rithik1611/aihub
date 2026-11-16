@@ -22,7 +22,8 @@ dependencies = [
     { name = "langsmith" },
     { name = "openai" },
     { name = "openpyxl" },
-    { name = "psycopg", extra = ["binary"] },
+    { name = "orjson" },
+    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic-settings" },
     { name = "pypdf" },
     { name = "rank-bm25" },
@@ -37,6 +38,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "yappi" },
 ]
 
 [package.metadata]
@@ -50,7 +52,8 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.17" },
     { name = "openai", specifier = ">=3.49.0" },
     { name = "openpyxl", specifier = ">=3.1" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
+    { name = "orjson", specifier = ">=3.10" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.1" },
     { name = "pydantic-settings", specifier = ">=2.7.1" },
     { name = "pypdf", specifier = ">=7.0.1" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
@@ -65,6 +68,7 @@ dev = [
     { name = "pytest", specifier = "==8.3.4" },
     { name = "pytest-asyncio", specifier = "==0.25.2" },
     { name = "ruff", specifier = ">=0.17.4" },
+    { name = "yappi", specifier = ">=1.7.6" },
 ]
 
 [[package]]
@@ -1183,6 +1187,9 @@ wheels = [
 binary = [
     { name = "psycopg-binary", marker = "implementation_name != 'pypy'" },
 ]
+pool = [
+    { name = "psycopg-pool" },
+]
 
 [[package]]
 name = "psycopg-binary"
@@ -1200,6 +1207,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/c6/434e01b19af141540147427675c116b2205ea58e3ec99e26431edf2d0714/psycopg_binary-3.3.9-cp312-cp312-musllinux_1_2_riscv64.whl", hash = "sha256:80ce081d2512ced75f1ca08ff80257a1288a3555079c5fa622164a0f9ed6533a", size = 3305336, upload-time = "2026-11-12T09:00:55.531Z" },
     { url = "https://files.pythonhosted.org/packages/eb/84/0ea715e106cc80a89aca36e34dd6685fa1ee75da9546d41a1d87356efb9f/psycopg_binary-3.3.9-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:30a95cb2b00b94b4ec4fd5d41de047598c60e0db26fd43bd9154152cc380b282", size = 3620366, upload-time = "2026-11-12T09:01:01.033Z" },
     { url = "https://files.pythonhosted.org/packages/81/a7/afe5fe01b4100454ea6543ac84c8b38a3713d6f27790253798ba50f2ef2a/psycopg_binary-3.3.9-cp312-cp312-win_amd64.whl", hash = "sha256:1ce1a6f04211626ca1a3deadee560235e8686e3888fb18f78d2be3e83bceabc4", size = 2907832, upload-time = "2026-11-12T09:01:04.735Z" },
+]
+
+[[package]]
+name = "psycopg-pool"
+version = "3.3.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/74/5e/c0664b968b102ff68b811d999c728546c48d5c1eec03e3bbaf88c0cb4472/psycopg_pool-3.3.3.tar.gz", hash = "sha256:df87b5d9d0ad7db37f6cdad4fa8ce113d250f5997f6db38e9a99192fb67f9e1d", size = 32006, upload-time = "2026-09-22T15:53:24.947Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5d/b4/452c6607a0f479465cd8a9b0d9956919fcb150050c1f83f9f11e6b8ee8dc/psycopg_pool-3.3.3-py3-none-any.whl", hash = "sha256:9b9cd6a4fcec47a410f7e82d408540e7f77b478509e91b44c1a5457a13e5ff37", size = 40304, upload-time = "2026-09-22T15:53:23.712Z" },
 ]
 
 [[package]]
@@ -1823,6 +1842,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b1/89/3214e23cf0318a400a158fd5731a4773709bc083385404e4d4f86cb800e6/xxhash-4.1.0-pp312-pypy312_pp80-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:13447184b2366346fcb26efc0b1cebd385c7bf32bbcb40dd3b4c7de96f856b27", size = 42692, upload-time = "2026-11-09T13:49:10.455Z" },
     { url = "https://files.pythonhosted.org/packages/1e/aa/0dbefd42116b6bd2fc96cbcf7836ff6d4241b1fead407ced196a5cb9b7a8/xxhash-4.1.0-pp312-pypy312_pp80-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:149940775d6a279baed5d90f1166a6c549443a3d4e922b3d6ded8bc6f491aae1", size = 47870, upload-time = "2026-11-09T13:47:28.986Z" },
     { url = "https://files.pythonhosted.org/packages/7b/85/97067532c82bee004bad078f5537a70de8ebc2b0f72e5e32ed489d033e31/xxhash-4.1.0-pp312-pypy312_pp80-win_amd64.whl", hash = "sha256:9917577060294726864d10ad8953f797e0c5b601ce0d95c82eaeba57df8ddae9", size = 95367, upload-time = "2026-11-09T13:47:31.937Z" },
+]
+
+[[package]]
+name = "yappi"
+version = "1.7.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/47/f7ec7744dff1104560d6276f951a8182f5b805e8d86ece591aebd0512845/yappi-1.7.6.tar.gz", hash = "sha256:c94281936af77c00c6ac2306a0e7f85a67e354d717120df85fcc5dfb9243d4dd", size = 62639, upload-time = "2026-03-17T22:31:40.928Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/0e/948fdb5980494c50fcf4d24cfd1d5c2ea9c48d4dd151e6b9c032d7ac5fed/yappi-1.7.6-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:56fae31c4e09448a9919c1e6a4f976b2a49aa914f42e6e95355f6329c83003da", size = 33256, upload-time = "2026-03-17T22:30:57.871Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/be/af330ad8ede549ecaa8b29d3a2185e2209b3a87056c05dbaaa7841497c6d/yappi-1.7.6-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:15ed0d845e30b35952d09dd4f70df81089db05b735d57c75e0924ebacda14a34", size = 33189, upload-time = "2026-03-17T22:30:58.733Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/80/220c5a34e3a4949cea0e0ff1049afab3a67f1bfb348db89a16bb74c77621/yappi-1.7.6-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2e878f63781761db7b62265468d78147b95df9ca2af9bc5140f94ad0faffe11c", size = 82799, upload-time = "2026-03-17T22:30:59.649Z" },
+    { url = "https://files.pythonhosted.org/packages/94/e0/e49b8e12140dba82767ee9fd8de1577be90a09a083aa6e0f02fdfc3e8ee9/yappi-1.7.6-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5a88615e2b9817887f6d1addfd12466a8529f25acc58b656205ae3f641cd725b", size = 82322, upload-time = "2026-03-17T22:31:00.524Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/95/fdcabc38a3e70e7c6394d07868ff25c9984a1ea97020cc65d8858c71aa62/yappi-1.7.6-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:178b23a56a59ddd58a528848e9242040ecad6d2fe0bcfb439455eef02cd43b07", size = 79978, upload-time = "2026-03-17T22:31:01.456Z" },
+    { url = "https://files.pythonhosted.org/packages/83/e6/6e11c44a90725a6f1afa4bc308618b2efc07a90d4c06e1d5a3b0125f8e6c/yappi-1.7.6-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:62cbb47dffca45b906d52a3c8f02e508f67d657275fb9d897e1e736fe5afe25f", size = 80053, upload-time = "2026-03-17T22:31:02.366Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/79/f056c72ba190d186fe52eb6a9181aab15dbd68a868ab5c7375e3b5796565/yappi-1.7.6-cp312-cp312-win32.whl", hash = "sha256:dbcf79ee2f1a96ec52e8291c07e27c0e38eead61a5c24d57eb467b5d9e6f2f9f", size = 32906, upload-time = "2026-03-17T22:31:03.29Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/89/a9ee11f80482263b7268c8968a4e675393454167b20574831a357610afd4/yappi-1.7.6-cp312-cp312-win_amd64.whl", hash = "sha256:59bd23fb39a7b9027c5eecc94585042849cb36be9af2d35c31812be1408af356", size = 35204, upload-time = "2026-03-17T22:31:04.131Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/72/711a33a5bf45e5af484a48001b75908dade76d4b8ed5d180f89dc62c5a5a/yappi-1.7.6-cp312-cp312-win_arm64.whl", hash = "sha256:0adc831b099a554831335819d7eb1643e189e4f3aa2db873ca5d584bd42dba01", size = 32836, upload-time = "2026-03-17T22:31:05.116Z" },
 ]
 
 [[package]]

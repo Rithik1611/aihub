@@ -61,11 +61,11 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
                 confirms.append('ASK_USER: ' + ' | '.join(f"{q.question} [{', '.join(o.label for o in q.options)}]" for q in card.questions))
                 return Answer(status='answered', answers={q.id: q.options[0].label for q in card.questions})
 
-            ctx = TurnContext(user_id='eval', user_email='eval@cablecore.local', cc_token=token, chat_id=f"eval-{case['id']}",
+            ctx = TurnContext(user_id=os.environ['EVAL_USER'], user_email='eval@cablecore.local', cc_token=token, chat_id=f"eval-{case['id']}",
                               wait_answer=wait_answer, tickets=Tickets())
             attachment = None
             if n == 0 and case.get('file'):
-                path = await sandbox.save_file(case['file'], (FILES / case['file']).read_bytes(), 'application/octet-stream', folder='uploads')
+                path = await sandbox.save_file(case['file'], (FILES / case['file']).read_bytes(), 'application/octet-stream', ctx.user_id, folder='uploads')
                 attachment = (case['file'], path)
             message = user_message(prompt, attachment, case.get('page', '/design'))
             t0, first_token, answered, error, items = time.time(), None, None, None, []  # answered: last streamed text
