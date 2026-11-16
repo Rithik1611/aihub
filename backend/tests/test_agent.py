@@ -1,9 +1,11 @@
 """The agent adapter's pure parts: history from stored messages, card <-> frontend questions, sizes."""
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from ai.context import ApprovalCard, Question, QuestionCard, QuestionOption
 
 from app.chat import agent
@@ -110,3 +112,25 @@ def test_step_labels_match_the_panel() -> None:
     )
     assert agent.step_label("cc_action", {"actions": [{"id": "design.copy"}]}) == "Ran design.copy"
     assert agent.step_label("something_new", {}) == "something new"
+
+
+async def test_a_chat_takes_one_message_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The check and the claim happen before any await, so two messages arriving together cannot both start
+    a turn and interleave in the transcript; the claim ends with the reply."""
+    gate = asyncio.Event()
+
+    async def slow_turn(**_: Any) -> Any:
+        await gate.wait()
+        yield {"type": "done"}
+
+    monkeypatch.setattr(agent, "_respond", slow_turn)
+    session = uuid.uuid4()
+    first = agent.respond(session_id=session)
+    running = asyncio.create_task(first.__anext__())
+    await asyncio.sleep(0)
+    with pytest.raises(agent.TurnBusy):
+        await agent.respond(session_id=session).__anext__()
+    gate.set()
+    assert (await running)["type"] == "done"
+    await first.aclose()
+    assert session not in agent._starting

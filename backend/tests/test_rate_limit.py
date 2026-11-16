@@ -8,10 +8,9 @@ from fastapi import HTTPException
 from app.core import rate_limit
 from app.core.auth import Caller
 from app.core.config import Settings
-
-ACCOUNT_A = uuid.UUID("6f1c2f2e-0b5a-4d6e-9f3a-2b7c8d9e0f11")
-ACCOUNT_B = uuid.UUID("11111111-2222-4333-8444-555555555555")
-PLANT = uuid.UUID("62a941e0-907a-4282-8634-062d5562eef0")
+from tests.support import ACCOUNT_ID as ACCOUNT_A
+from tests.support import OTHER_ACCOUNT_ID as ACCOUNT_B
+from tests.support import make_caller, make_settings
 
 
 @pytest.fixture(autouse=True)
@@ -20,16 +19,11 @@ def _clear_counters() -> None:
 
 
 def settings(limit: int = 3, window: int = 60) -> Settings:
-    return Settings(
-        database_url="postgresql+asyncpg://u:p@localhost:5432/db",  # type: ignore[arg-type]
-        jwt_secret="irrelevant-here",  # type: ignore[arg-type]
-        chat_rate_limit=limit,
-        chat_rate_window_seconds=window,
-    )
+    return make_settings(chat_rate_limit=limit, chat_rate_window_seconds=window)
 
 
 def caller(account_id: uuid.UUID) -> Caller:
-    return Caller.model_validate({"sub": str(account_id), "activePlantId": str(PLANT), "canAccessAi": True})
+    return make_caller(sub=str(account_id))
 
 
 async def test_allows_requests_up_to_the_limit() -> None:
