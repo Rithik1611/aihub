@@ -49,16 +49,18 @@ def _words(text: str) -> list[str]:
     return [w.lower() for w in _TOKEN.findall(text or '') if w.lower() not in _STOP]
 
 
-def _resolve(node: Any, components: dict, depth: int = 0) -> Any:
-    if depth > 6:
-        return {}
+def _resolve(node: Any, components: dict, refs: int = 0) -> Any:
+    """Inline $refs. Only $ref hops are limited (they are what can loop); plain nesting is walked in full,
+    so a body's nested items (e.g. attributeValues[].id) keep their shape."""
     if isinstance(node, dict):
         if '$ref' in node:
+            if refs >= 8:
+                return {}
             name = node['$ref'].split('/')[-1]
-            return _resolve(components.get(name, {}), components, depth + 1)
-        return {k: _resolve(v, components, depth + 1) for k, v in node.items()}
+            return _resolve(components.get(name, {}), components, refs + 1)
+        return {k: _resolve(v, components, refs) for k, v in node.items()}
     if isinstance(node, list):
-        return [_resolve(n, components, depth + 1) for n in node]
+        return [_resolve(n, components, refs) for n in node]
     return node
 
 
@@ -105,19 +107,45 @@ async def is_read_route(method: str, path: str, token: str) -> bool:
     )
 
 
+def _capability(rid: str, op: dict, params: list[dict], body: dict | None, file_field: str | None,
+                components: dict) -> dict | None:
+    """The @AiCapability descriptor, from the operation's `x-ai` extension and its own OpenAPI schemas:
+    the same shape /ai/capabilities used to serve (input slots, no $refs, so definitions stay empty)."""
+    x = op.get('x-ai')
+    if not isinstance(x, dict):
+        return None
+    inp: dict[str, Any] = {}
+    path_params = [p['name'] for p in params if p.get('in') == 'path']
+    if path_params:
+        inp['path'] = {'type': 'object', 'properties': {p: {'type': 'string'} for p in path_params}, 'required': path_params}
+    query = [p for p in params if p.get('in') == 'query']
+    if query:
+        inp['query'] = {'type': 'object', 'properties': {p['name']: _resolve(p.get('schema') or {}, components) for p in query},
+                        'required': [p['name'] for p in query if p.get('required')]}
+    fields = x.get('fields') or {}
+    if body is not None or fields:  # wire-format overrides replace what the DTO's TS type says
+        base = body or {'type': 'object'}
+        inp['body'] = {**base, 'properties': {**(base.get('properties') or {}), **fields}}
+    if file_field:
+        inp['file'] = {'field': file_field}
+    return {'name': rid, 'summary': x.get('summary', ''), 'returns': x.get('returns', ''), 'risk': x.get('risk'),
+            **({'job': x['job']} if x.get('job') else {}), 'input': inp, 'definitions': {}}
+
+
 async def _build(token: str) -> None:
     global _bm25, _order, _routes
     routes: dict[str, Route] = {}
     order: list[str] = []
     spec = await api.spec(token)
-    caps = await api.capabilities(token)
+    # ponytail: /ai/capabilities is the fallback while a backend without x-ai is still deployed; drop it after.
+    has_x_ai = any('x-ai' in op for ops in spec.get('paths', {}).values() for op in ops.values() if isinstance(op, dict))
+    caps = {} if has_x_ai else await api.capabilities(token)
     components = spec.get('components', {}).get('schemas', {})
     docs: list[list[str]] = []
     for path, ops in spec.get('paths', {}).items():
         for method, op in ops.items():
             method = method.upper()
             rid = op.get('operationId') or f'{method} {path}'
-            cap = caps.get(rid)
             params = op.get('parameters') or []
             content = (op.get('requestBody') or {}).get('content') or {}
             multipart = next((v for k, v in content.items() if 'multipart' in k), None)
@@ -126,6 +154,7 @@ async def _build(token: str) -> None:
             if multipart:
                 props = _resolve(multipart.get('schema') or {}, components).get('properties', {})
                 file_field = next((k for k, v in props.items() if v.get('format') == 'binary'), 'file')
+            cap = _capability(rid, op, params, body, file_field, components) if has_x_ai else caps.get(rid)
             if cap and (cap.get('input') or {}).get('file'):
                 file_field = cap['input']['file'].get('field') or file_field
             summary = (cap or {}).get('summary') or (op.get('description') or '').split('\n')[0] or ' '.join(_words(rid.split('_')[-1]))
