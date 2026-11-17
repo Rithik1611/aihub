@@ -13,6 +13,9 @@ RUN FS="$(python3-ot -c 'import open_terminal.utils.fs as f; print(f.__file__)')
  && sudo grep -q '"chmod", "g+w", path' "$FS" \
  && sudo sed -i 's/"chmod", "g+w", path/"chmod", "g+rw", path/' "$FS" \
  && sudo find "$(dirname "$FS")/__pycache__" -name 'fs.*.pyc' -delete
+# An account that already exists keeps the home folder it finds, even another uid's: re-own it (see the script).
+COPY patch-open-terminal.py /tmp/patch-open-terminal.py
+RUN sudo python3-ot /tmp/patch-open-terminal.py
 COPY cablecore-entry.sh /tmp/cablecore-entry.sh
 RUN sudo sh -c "sed 's/\r$//' /tmp/cablecore-entry.sh > /app/cablecore-entry.sh && chmod 755 /app/cablecore-entry.sh"
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/cablecore-entry.sh"]
