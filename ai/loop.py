@@ -12,10 +12,10 @@ import os
 from dataclasses import replace
 from typing import AsyncIterator
 
-from ai import apps, ask_user, http, memory, sandbox, web
+from ai import apps, ask_user, http, imagegen, images, memory, sandbox, skills, web
 from ai.context import Event, TurnContext
 from ai.settings import settings
-from ai.tools import Tool, run, tool
+from ai.tools import Tool, request_specs, run, tool
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def _body(input_items: list[dict], specs: list[dict]) -> dict:
 async def agent(ctx: TurnContext, instructions: str, items: list[dict], tools: dict[str, Tool],
                 usage: dict[str, int], stream_text: bool = True, max_steps: int = MAX_STEPS) -> AsyncIterator[Event]:
     """Runs model steps until the model answers without tool calls. New output is appended to `items`."""
-    specs = [t.spec() for t in tools.values()]
+    specs = request_specs(tools.values())
     retried = False
     for _ in range(max_steps):
         response = None
@@ -198,10 +198,17 @@ def _delegate_tool(instructions: str, tools: dict[str, Tool], usage: dict[str, i
     return tool(delegate_task)
 
 
-async def turn_tools(ctx: TurnContext, instructions: str, usage: dict[str, int]) -> dict[str, Tool]:
+async def turn_tools(ctx: TurnContext, instructions: str, usage: dict[str, int],
+                     guests: list[apps.Guest] | None = None) -> dict[str, Tool]:
     pack = apps.get(ctx.app_id)
-    tools = [*pack.tools(), ask_user.TOOL, *memory.tools(ctx), *web.TOOLS, *await sandbox.tools(ctx)]
+    tools = [*pack.tools(), ask_user.TOOL, *memory.tools(ctx), *web.TOOLS, *images.tools(), *imagegen.tools(), *await sandbox.tools(ctx)]
     by_name = {t.name: t for t in tools}
+    for guest in guests or []:  # another app's tools: deferred, so they cost nothing until tool search loads them
+        by_name.update({t.name: t for t in guest.tools if t.name not in by_name})
+        if guest.skills and 'load_skill' in by_name:
+            by_name['load_skill'] = skills.with_skills(by_name['load_skill'], guest.skills)
+    if any(t.guest for t in by_name.values()):
+        by_name.setdefault('tool_search', skills.tool_search_tool())
     by_name['delegate_task'] = _delegate_tool(instructions, by_name, usage)
     return by_name
 
@@ -241,8 +248,9 @@ async def run_turn(ctx: TurnContext, history: list[dict], message: dict) -> Asyn
     turn_items = [message]
     try:
         pack = apps.get(ctx.app_id)
-        instructions = await pack.instructions(ctx) + await sandbox.instructions(ctx)
-        tools = await turn_tools(ctx, instructions, usage)
+        guests = await apps.guests(ctx)  # other apps this user has (MES): a brief here, their tools deferred
+        instructions = await pack.instructions(ctx) + await sandbox.instructions(ctx) + apps.briefs(guests)
+        tools = await turn_tools(ctx, instructions, usage, guests)
         items = [*history, message]
         start = len(items)
         async for event in agent(ctx, instructions, items, tools, usage):

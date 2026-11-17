@@ -21,6 +21,7 @@ defer_loading, hidden from the model until it searches for them, and `tool_searc
 """
 
 import re
+from dataclasses import replace
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -93,6 +94,16 @@ def load_skill_tool(skills: dict[str, Skill], fill: Fill | None = None) -> Tool:
         return await fill(skill.body, ctx) if fill else skill.body
 
     return tool(load_skill)
+
+
+def with_skills(load: Tool, more: dict[str, Skill]) -> Tool:
+    """An app's load_skill that also loads these skills (a guest app's), by name."""
+    extra = load_skill_tool(more)
+
+    async def load_skill(ctx: TurnContext, name: str, file: str = '') -> str:
+        return await (extra if name in more else load).fn(ctx, name=name, file=file)
+
+    return replace(load, fn=load_skill)
 
 
 def tool_search_tool() -> Tool:

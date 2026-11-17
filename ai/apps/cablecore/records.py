@@ -5,6 +5,7 @@ Read as the `ai_reader` role (SELECT only), so this never changes data.
 
 import asyncio
 import json
+import os
 import re
 import threading
 from datetime import date, datetime
@@ -19,9 +20,15 @@ _UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 MAX_CHARS = 9000
 
 
+def _in_container() -> bool:
+    return os.path.exists('/.dockerenv')
+
+
 def _dsn() -> str:
-    # The sandbox reaches Postgres as host.docker.internal; this process runs on the host.
-    return settings().cc_db_url.get_secret_value().replace('host.docker.internal', 'localhost')
+    dsn = settings().cc_db_url.get_secret_value()
+    # One CC_DB_URL serves the sandbox (a container, so host.docker.internal) and this process. Run directly on the host,
+    # that name does not resolve and becomes localhost; run in a container, it must stay: localhost there is the container.
+    return dsn if _in_container() else dsn.replace('host.docker.internal', 'localhost')
 
 
 POOL_MAX = 16  # connections shared by every lookup (they run in worker threads); a new one per query cost CPU under load

@@ -1,0 +1,179 @@
+[
+ {
+  "name": "mes_mes_list_my_sites",
+  "args": [],
+  "description": "Use first to see which MES site areas the user is assigned to and which one is currently selected. Returns the site names. Read-only."
+ },
+ {
+  "name": "mes_mes_list_machines",
+  "args": [
+   "Site",
+   "NameContains"
+  ],
+  "description": "Use to find machines (production lines) and their current state across all the user\u2019s sites. Only machines the user is assigned to are listed. Shows at most 100. Read-only."
+ },
+ {
+  "name": "mes_mes_list_jobs",
+  "args": [
+   "Status",
+   "JobCodeContains",
+   "Machine",
+   "ProductionOrder",
+   "Shift"
+  ],
+  "description": "Use for questions that list jobs: in progress, ready, on a machine, of a production order or in a shift. Covers all the user\u2019s sites; every line shows its site. All inputs optional. If Shift is given only the shift filter is used; else if ProductionOrder is given only that is used; else Status, JobCodeContains and Machine apply together. Read-only."
+ },
+ {
+  "name": "mes_mes_job_counts",
+  "args": [
+   "Status",
+   "Machine",
+   "Site"
+  ],
+  "description": "Use for \u2019how many jobs\u2019 questions. Returns job counts by status for each of the user\u2019s sites, plus totals, so no listing is needed. Read-only."
+ },
+ {
+  "name": "mes_mes_get_job",
+  "args": [
+   "JobCode",
+   "Include"
+  ],
+  "description": "Use for everything about one job. Always returns the header (status, progress, machine, lots with required and produced quantities). Add sections with Include only when needed. Read-only."
+ },
+ {
+  "name": "mes_mes_find_lot",
+  "args": [
+   "LotCode"
+  ],
+  "description": "Use when you only have a lot code or ERP tag. Looks for it as a production lot on jobs and as an inventory lot, across all the user\u2019s sites. Then call mes_get_job or mes_get_lot for full details. Read-only."
+ },
+ {
+  "name": "mes_mes_why_lot_unavailable",
+  "args": [
+   "JobCode",
+   "LotCode"
+  ],
+  "description": "Use to explain why a lot cannot be used for a job (status, quantity, location or allocation). Read-only."
+ },
+ {
+  "name": "mes_mes_list_production_orders",
+  "args": [
+   "Status"
+  ],
+  "description": "Use to list production orders with status, customer and required quantity across all the user\u2019s sites. Read-only."
+ },
+ {
+  "name": "mes_mes_get_production_order",
+  "args": [
+   "PoId",
+   "Include"
+  ],
+  "description": "Use for one production order: header plus its jobs (jobs included by default). Read-only."
+ },
+ {
+  "name": "mes_mes_get_machine",
+  "args": [
+   "MachineName",
+   "Include"
+  ],
+  "description": "Use for one machine. Include chooses what to return: queue, state_history, comments, documents (default queue and state_history). Only machines the user is assigned to. Read-only."
+ },
+ {
+  "name": "mes_mes_get_shift_window",
+  "args": [
+   "WhichShift"
+  ],
+  "description": "Use to turn \u2019this shift\u2019 into a start and end time for the user\u2019s current site. Read-only."
+ },
+ {
+  "name": "mes_mes_list_inventory_lots",
+  "args": [
+   "ItemId",
+   "Status",
+   "Location",
+   "IncludeArchived"
+  ],
+  "description": "Use to find inventory lots by item, status or storage location across all the user\u2019s sites (first 25). Read-only."
+ },
+ {
+  "name": "mes_mes_inventory_summary",
+  "args": [
+   "IncludeArchived"
+  ],
+  "description": "Use for totals of inventory lots by status across all the user\u2019s sites. Read-only."
+ },
+ {
+  "name": "mes_mes_get_lot",
+  "args": [
+   "LotCode",
+   "Include"
+  ],
+  "description": "Use for everything about one inventory lot. Always returns the header (item, quantity, status, location, dates). Add sections with Include: history, movements, traceability, ncm, quality. Read-only."
+ },
+ {
+  "name": "mes_mes_list_storage",
+  "args": [
+   "Type",
+   "TypeName",
+   "Status"
+  ],
+  "description": "Use to list storage locations (default) or storage units (Type = units; needs the storage unit role) across all the user\u2019s sites. Read-only."
+ },
+ {
+  "name": "mes_mes_list_quality_orders",
+  "args": [
+   "Type",
+   "Status",
+   "Result",
+   "Search"
+  ],
+  "description": "Use to list quality orders (latest 25) across all the user\u2019s sites. Read-only."
+ },
+ {
+  "name": "mes_mes_get_quality_order",
+  "args": [
+   "OrderId",
+   "Include"
+  ],
+  "description": "Use for one quality order with its parameters, limits and recorded values. Add history with Include. Read-only."
+ },
+ {
+  "name": "mes_mes_quality_counts",
+  "args": [
+   "Type"
+  ],
+  "description": "Use for how many quality orders there are by status across all the user\u2019s sites. Read-only."
+ },
+ {
+  "name": "mes_mes_list_rework",
+  "args": [
+   "TaskId",
+   "Status",
+   "LotId"
+  ],
+  "description": "Use to list rework tasks (latest 30) across all the user\u2019s sites, or pass TaskId for one task with its lot, machine, consumption and progress. Read-only."
+ },
+ {
+  "name": "mes_mes_search_knowledge",
+  "args": [
+   "Query",
+   "Sources"
+  ],
+  "description": "Use for how-to and policy questions. Searches uploaded and SharePoint documents (documents), returns the site team\u2019s saved knowledge (site_knowledge) and can list help topics (help_topics). Read-only."
+ },
+ {
+  "name": "mes_mes_list_documents",
+  "args": [
+   "JobCode",
+   "MachineName"
+  ],
+  "description": "Use to list the available documents (uploaded and SharePoint), or the document names attached to a job or a machine. Names only, no files. Read-only."
+ },
+ {
+  "name": "mes_mes_get_help_topic",
+  "args": [
+   "TopicId"
+  ],
+  "description": "Use to read one help topic. Get the TopicId from mes_search_knowledge with Sources = help_topics. Read-only."
+ }
+]

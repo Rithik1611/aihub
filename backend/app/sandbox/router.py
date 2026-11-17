@@ -20,7 +20,7 @@ from typing import Annotated, Any, Final
 
 import httpx
 import psycopg
-from ai import sandbox
+from ai import imagegen, sandbox
 from ai.apps.cablecore.api import CableCoreError
 from ai.apps.cablecore.index import is_read_route
 from ai.apps.cablecore.tools import cc_related
@@ -112,6 +112,15 @@ async def gateway(path: str, request: Request, x_cc_ticket: Annotated[str, Heade
             headers=headers,
         )
     return Response(upstream.content, status_code=upstream.status_code, media_type=upstream.headers.get("content-type"))
+
+
+@router.get("/chat/images/{user_id}/{name}")
+async def generated_image(caller: CurrentCaller, user_id: str, name: str) -> Response:
+    """A picture made by generate_image, for its owner only (the browser sends the session cookie with the <img>)."""
+    path = imagegen.image_path(user_id, name) if user_id == str(caller.account_id) else None
+    if path is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")  # same answer for someone else's picture
+    return Response(path.read_bytes(), media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/chat/files")

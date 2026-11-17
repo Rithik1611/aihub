@@ -19,13 +19,15 @@ import aiohttp
 
 from ai import TurnContext, http, run_turn, sandbox, user_message
 from ai.apps.cablecore import api
-from ai.context import Answer, ApprovalCard, Card, Done, Error, Items, TextDelta
+from ai.context import Answer, ApprovalCard, Card, Done, Error, Items, TextDelta, ToolEnd, ToolStart
 
 HERE = pathlib.Path(__file__).parent
 FILES = pathlib.Path(os.getenv('EVAL_FILES', 'C:/DDM/ai-demo-files'))
 
 
 async def login() -> str:
+    if os.getenv('EVAL_NO_LOGIN'):  # e.g. the MES evaluation: its tools need the user's name (EVAL_USER_EMAIL), not a cableCORE session
+        return ''
     async with aiohttp.ClientSession() as s:
         async with s.post(f'{api.CC_API_URL}/auth/token', json={'username': os.environ['EVAL_USER'], 'password': os.environ['EVAL_PASS']}) as r:
             body = await r.json()
@@ -61,7 +63,7 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
                 confirms.append('ASK_USER: ' + ' | '.join(f"{q.question} [{', '.join(o.label for o in q.options)}]" for q in card.questions))
                 return Answer(status='answered', answers={q.id: q.options[0].label for q in card.questions})
 
-            ctx = TurnContext(user_id=os.environ['EVAL_USER'], user_email='eval@cablecore.local', cc_token=token, chat_id=f"eval-{case['id']}",
+            ctx = TurnContext(user_id=os.getenv('EVAL_USER', 'eval'), user_email=os.getenv('EVAL_USER_EMAIL', 'eval@cablecore.local'), cc_token=token, chat_id=f"eval-{case['id']}",
                               wait_answer=wait_answer, tickets=Tickets())
             attachment = None
             if n == 0 and case.get('file'):
@@ -69,8 +71,15 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
                 attachment = (case['file'], path)
             message = user_message(prompt, attachment, case.get('page', '/design'))
             t0, first_token, answered, error, items, usage = time.time(), None, None, None, [], {}  # answered: last streamed text
+            started: dict[str, float] = {}
+            timings: list[dict] = []  # each tool call: name, start (s into the turn), duration
             async for e in run_turn(ctx, history, message):
-                if isinstance(e, TextDelta):
+                if isinstance(e, ToolStart):
+                    started[e.call_id] = time.time()
+                elif isinstance(e, ToolEnd) and e.call_id in started:
+                    at = started.pop(e.call_id)
+                    timings.append({'name': e.name, 'start_s': round(at - t0, 2), 'ms': round((time.time() - at) * 1000), 'status': e.status})
+                elif isinstance(e, TextDelta):
                     first_token = first_token or time.time() - t0
                     answered = time.time() - t0
                 elif isinstance(e, Error):
@@ -84,7 +93,7 @@ async def run_case(case: dict, token: str, sem: asyncio.Semaphore) -> dict:
             latency = time.time() - t0
             turns.append({'prompt': prompt, 'latency_s': round(latency, 1), 'answer_s': round(answered or latency, 1), 'checked': True,
                           'first_token_s': round(first_token, 1) if first_token else None, 'error': error, 'answer': text,
-                          'tools': calls, 'confirmations': confirms, 'usage': usage})
+                          'tools': calls, 'tool_timings': timings, 'confirmations': confirms, 'usage': usage})
             print(f"{case['id']} {latency:.1f}s tools={len(calls)} err={error}", flush=True)
         return {'id': case['id'], 'group': case.get('group'), 'chat_id': f"eval-{case['id']}", 'turns': turns}
 
@@ -94,7 +103,16 @@ async def main() -> None:
     cases = [c for c in json.load(open(os.getenv('EVAL_CASES', HERE / 'cases.json'), encoding='utf-8')) if not ids or c['id'] in ids]
     token = await login()
     sem = asyncio.Semaphore(concurrency)
-    results = await asyncio.gather(*(run_case(c, token, sem) for c in cases))
+    async def safe(c: dict) -> dict:  # one broken case (e.g. the sandbox refusing an upload) must not end the run
+        try:
+            return await run_case(c, token, sem)
+        except Exception as e:
+            print(f"{c['id']} CRASH {type(e).__name__}: {e}", flush=True)
+            return {'id': c['id'], 'chat_id': f"eval-{c['id']}", 'turns': [{'prompt': c['turns'][0], 'latency_s': 0, 'answer_s': 0, 'checked': True,
+                    'first_token_s': None, 'error': f'{type(e).__name__}: {e}', 'answer': '', 'tools': [], 'tool_timings': [],
+                    'confirmations': [], 'usage': {}}]}
+
+    results = await asyncio.gather(*(safe(c) for c in cases))
     json.dump(results, open(out, 'w', encoding='utf-8'), indent=1, ensure_ascii=False)
     await http.close()
 

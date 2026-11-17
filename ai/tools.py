@@ -12,6 +12,7 @@ import re
 import types
 import typing
 from dataclasses import dataclass
+from collections.abc import Iterable
 from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
@@ -36,12 +37,34 @@ class Tool:
     # With TOOL_SEARCH on, sent with defer_loading: hidden from the model until it finds it with tool search.
     defer: bool = False
     raw_spec: dict[str, Any] | None = None  # a provider tool (e.g. tool_search) sent as is
+    # Another app's tool (ai.apps guest): always sent with defer_loading, even with TOOL_SEARCH off.
+    guest: bool = False
+    # Sent inside this namespace (name, description): until tool search loads it the model sees only the namespace's
+    # description, not each tool's (measured on luna: 615 vs 1,912 input tokens for 22 deferred MES tools).
+    namespace: tuple[str, str] | None = None
 
     def spec(self) -> dict[str, Any]:
         if self.raw_spec is not None:
             return self.raw_spec
         spec = {'type': 'function', 'name': self.name, 'description': self.description, 'parameters': self.parameters}
-        return {**spec, 'defer_loading': True} if self.defer and settings().tool_search else spec
+        deferred = self.guest or (self.defer and settings().tool_search)
+        return {**spec, 'defer_loading': True} if deferred else spec
+
+
+def request_specs(tools: Iterable[Tool]) -> list[dict[str, Any]]:
+    """The request's `tools`: each tool's spec, tools of one namespace grouped into it (in first-seen order)."""
+    out: list[dict[str, Any]] = []
+    groups: dict[str, dict[str, Any]] = {}
+    for t in tools:
+        if t.namespace is None:
+            out.append(t.spec())
+            continue
+        name, description = t.namespace
+        if name not in groups:
+            groups[name] = {'type': 'namespace', 'name': name, 'description': description, 'tools': []}
+            out.append(groups[name])
+        groups[name]['tools'].append(t.spec())
+    return out
 
 
 def _allows_none(annotation: Any) -> bool:

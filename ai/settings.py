@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     luna_model: str = 'gpt-5.6-luna'
     # cableCORE
     cc_api_url: str = 'http://localhost:5000'
+    cc_public_url: str = 'http://localhost:5000'  # the same backend as the user's browser reaches it (pictures in the chat)
     cc_db_url: SecretStr = SecretStr('')  # read-only role ai_reader
     cc_schema_dir: Path = _APP_DIR.parents[3] / 'cableCORE_BE' / 'prisma' / 'models'
     cc_notes_file: Path = _APP_DIR / 'app_notes.md'
@@ -34,6 +35,25 @@ class Settings(BaseSettings):
     cc_terminal_url: str = 'http://localhost:8070'
     open_terminal_api_key: SecretStr = SecretStr('')
     cc_sandbox_tools: str = _SANDBOX_TOOLS
+    # pictures for the chat (SerpAPI Google Images); empty = no search_images tool
+    serpapi_key: SecretStr = SecretStr('')
+    # generate_image (OpenAI image model); empty model = no tool. Base URL / key empty = the chat model's.
+    image_model: str = ''
+    image_base_url: str = ''
+    image_api_key: SecretStr = SecretStr('')
+    image_dir: Path = Path('generated_images')  # one folder per user; a shared volume when aihub runs several replicas
+    image_public_url: str = 'http://localhost:8000'  # aihub as the user's browser reaches it
+    image_retention_days: int = Field(default=30, ge=1)
+    image_per_user_per_hour: int = Field(default=5, ge=1)
+    # MES (Mendix MCP server): empty url = off. Tokens are per user: JSON {"cableCORE username": "token"}
+    mes_mcp_url: str = ''
+    mes_user_tokens: SecretStr = SecretStr('')
+    # MES tools offered besides those the server marks readOnlyHint: reviewed read tools only (comma separated)
+    mes_read_tools: str = (
+        'mes_list_my_sites,mes_list_machines,mes_list_jobs,mes_job_counts,mes_get_job,mes_find_lot,mes_why_lot_unavailable,'
+        'mes_list_production_orders,mes_get_production_order,mes_get_machine,mes_get_shift_window,mes_list_inventory_lots,'
+        'mes_inventory_summary,mes_get_lot,mes_list_storage,mes_list_quality_orders,mes_get_quality_order,mes_quality_counts,'
+        'mes_list_rework,mes_search_knowledge,mes_list_documents,mes_get_help_topic')
     # loop
     agent_max_steps: int = Field(default=100, ge=1)
     agent_reasoning_effort: Literal['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] = 'medium'

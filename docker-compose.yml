@@ -35,6 +35,8 @@ services:
       ZOEKT_URL: http://zoekt:6070
       # Learned app notes outlive the container (one aihub replica; see the notes module).
       CC_NOTES_FILE: /data/app_notes.md
+      # generate_image pictures (one folder per user), kept with the notes
+      IMAGE_DIR: /data/images
     volumes:
       - aihub-data:/data
     ports:

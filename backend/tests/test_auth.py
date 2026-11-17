@@ -255,13 +255,13 @@ async def test_cors_origins_must_be_exact(origin: str) -> None:
 async def test_each_rejection_builds_its_own_exception() -> None:
     """A shared HTTPException instance would have `raise ... from` overwrite one
     request's error context with another's."""
-    seen: list[int] = []
+    seen: list[HTTPException] = []  # the objects, not id()s: a freed object's id can be reused
     for secret in ("wrong-one", "wrong-two"):
         token = jwt.encode({"sub": str(ACCOUNT_ID), "type": "access", "exp": 9999999999}, secret, algorithm="HS256")
         with pytest.raises(HTTPException) as exc:
             await get_caller(bearer(token), settings())
-        seen.append(id(exc.value))
-    assert seen[0] != seen[1]
+        seen.append(exc.value)
+    assert seen[0] is not seen[1]
 
 
 @pytest.mark.parametrize(

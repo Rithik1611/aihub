@@ -4,3 +4,8 @@ __pycache__/
 .env
 .pytest_cache/
 .code_index/
+generated_images/
+# MES eval outputs and plant data: local only
+ai/apps/cablecore/evals/mes/out/
+ai/apps/cablecore/evals/mes/use_cases.json
+ai/apps/cablecore/evals/mes/mes_facts.json
