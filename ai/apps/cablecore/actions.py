@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from ai import sandbox
-from ai.apps.cablecore import access, api, index, records
+from ai.apps.cablecore import access, api, index, records, shape
 from ai.context import ApprovalCard, ApprovalItem, TurnContext, WriteRecord
 
 
@@ -30,10 +30,22 @@ class Action(BaseModel):
 
 JOB_TIMEOUT_S = 120
 RESULT_CHARS = 3000
+# A large response of a described route is trimmed to the fields its `returns` names (shape.trim): dense, so it
+# may be longer than a raw clip (a design header: 182k chars raw, 8k trimmed).
+TRIMMED_CHARS = 12000
 
 def _clip(value: Any, limit: int = RESULT_CHARS) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
     return text if len(text) <= limit else text[:limit] + f'… ({len(text) - limit} more chars)'
+
+
+def _result(route: index.Route, value: Any) -> str:
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    returns = (route.capability or {}).get('returns')
+    if len(text) > RESULT_CHARS and returns and (trimmed := shape.trim(value, returns)) is not None:
+        note = f'[trimmed to the fields `returns` names ({len(text):,} chars in full); other fields exist]'
+        return note + '\n' + _clip(trimmed, TRIMMED_CHARS)
+    return _clip(text)
 
 
 def _readable(value: Any) -> str:
@@ -244,7 +256,7 @@ async def run(actions: list[Action] | list[dict[str, Any]], verify: list[str] | 
             entry['error'] = error
             stopped = route.risk != 'read'
         else:
-            entry['result'] = _clip(api.unwrap(data))
+            entry['result'] = _result(route, api.unwrap(data))
             if job := await _follow_job(token, route, data):
                 entry['job'] = job
                 if job.get('failed'):

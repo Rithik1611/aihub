@@ -143,6 +143,8 @@ async def _build(token: str) -> None:
     components = spec.get('components', {}).get('schemas', {})
     docs: list[list[str]] = []
     for path, ops in spec.get('paths', {}).items():
+        if path.startswith('/mcp/'):  # the MCP bridge serves the MCP server, with its own (name-based) semantics
+            continue
         for method, op in ops.items():
             method = method.upper()
             rid = op.get('operationId') or f'{method} {path}'

@@ -7,6 +7,7 @@ Every call carries the chat user's id (X-User-Id): the sandbox runs in multi-use
 own Linux account and home folder, and another user's files answer "Permission denied".
 """
 
+import asyncio
 import json
 import os
 import re
@@ -55,12 +56,20 @@ async def read_file(path: str, user_id: str) -> tuple[str, bytes, str]:
 async def save_file(name: str, content: bytes, mime: str, user_id: str, folder: str = 'exports') -> str:
     """Stores a file in the user's home under work/<folder>/<random>/ and returns its sandbox path."""
     directory = f'{await home(user_id)}/work/{folder}/{uuid.uuid4().hex[:8]}'
-    form = aiohttp.FormData()
-    form.add_field('file', content, filename=os.path.basename(name) or 'download', content_type=mime)
-    async with http.session().post(f'{SANDBOX_URL}/files/upload', params={'directory': directory}, data=form, headers=_headers(user_id)) as r:
-        if r.status != 200:
-            raise SandboxError(f'The returned file could not be stored ({r.status}).')
-        return (await r.json())['path']
+    status = 0
+    # A user's first calls after the sandbox restarts can race its account set-up (Open Terminal creates the
+    # account, then hands the home folder over): the folder is briefly not theirs. One retry rides that out.
+    for attempt in range(2):
+        form = aiohttp.FormData()
+        form.add_field('file', content, filename=os.path.basename(name) or 'download', content_type=mime)
+        async with http.session().post(f'{SANDBOX_URL}/files/upload', params={'directory': directory}, data=form, headers=_headers(user_id)) as r:
+            status = r.status
+            if status == 200:
+                return (await r.json())['path']
+        if status not in (403, 500) or attempt:
+            break
+        await asyncio.sleep(1.5)
+    raise SandboxError(f'The returned file could not be stored ({status}).')
 
 
 # ---- the model's sandbox tools, built from the sandbox's own OpenAPI
